@@ -174,9 +174,9 @@ impl Where {
         &'a self,
         store: &'a Store,
         frames: impl Iterator<Item = Frame> + 'a,
-    ) -> impl Iterator<Item = Frame> + 'a {
+    ) -> Box<dyn Iterator<Item = Frame> + 'a> {
         match self {
-            Where::Pattern(p) => frames.flat_map(move |frame| {
+            Where::Pattern(p) => Box::new(frames.flat_map(move |frame| {
                 store.iter().filter_map(move |datom| {
                     let mut frame = frame.clone();
                     if let Ok(()) = p.match_(&mut frame, datom) {
@@ -185,7 +185,8 @@ impl Where {
                         None
                     }
                 })
-            }),
+            })),
+            Where::And(left, right) => right.qeval(store, left.qeval(store, frames)),
             _ => todo!(),
         }
     }
@@ -398,16 +399,6 @@ macro_rules! datom {
 mod tests {
     use super::*;
 
-    fn store() -> Store {
-        Store {
-            data: vec![
-                datom![100, :name "Moritz"],
-                datom![100, :age 39],
-                datom![200, :name "Piet"],
-            ],
-        }
-    }
-
     #[test]
     fn macro_datom() {
         let datom = datom![20, :person/name "M"];
@@ -526,12 +517,25 @@ mod tests {
             .is_err());
     }
 
+    fn store() -> Store {
+        Store {
+            data: vec![
+                datom![100, :name "Moritz"],
+                datom![100, :age 39],
+                datom![200, :name "Piet"],
+                datom![200, :age 39],
+            ],
+        }
+    }
+
     #[test]
     fn qeval_pattern() {
         let q = query! {
-            find: [?person, ?a],
+            find: [?p, ?name],
             where: [
-                [?person, ?a "Moritz"]
+                [?p, :name "Moritz"]
+                [?p, :name ?name]
+                [?p, :age 39]
             ]
         };
 
