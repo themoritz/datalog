@@ -1,6 +1,8 @@
+#![allow(dead_code, unused_macros)]
+
 // Store
 
-use std::{collections::HashMap, fmt::{Display, Pointer}};
+use std::{collections::HashMap, fmt::Display};
 
 trait Data: PartialEq {
     fn compare_to_bound(&self, bound: &BoundValue) -> bool;
@@ -42,7 +44,25 @@ impl Data for Attribute {
 #[derive(PartialEq, Clone, Debug)]
 enum Value {
     Str(String),
-    Float(f64)
+    Float(f64),
+}
+
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Self::Float(value)
+    }
+}
+
+impl From<u64> for Value {
+    fn from(value: u64) -> Self {
+        Self::Float(value as f64)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Self::Str(value.to_string())
+    }
 }
 
 impl Display for Value {
@@ -67,24 +87,15 @@ impl Data for Value {
     }
 }
 
+#[derive(PartialEq, Debug)]
 struct Datom {
     e: Entity,
     a: Attribute,
     v: Value,
 }
 
-impl Datom {
-    fn str(e: u64, a: impl ToString, v: impl ToString) -> Self {
-        Datom { e: Entity(e), a: Attribute(a.to_string()), v: Value::Str(v.to_string()) }
-    }
-
-    fn flt(e: u64, a: impl ToString, v: f64) -> Self {
-        Datom { e: Entity(e), a: Attribute(a.to_string()), v: Value::Float(v) }
-    }
-}
-
 struct Store {
-    data: Vec<Datom>
+    data: Vec<Datom>,
 }
 
 impl Store {
@@ -95,7 +106,7 @@ impl Store {
 
 // Query
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Var(String);
 
 impl Display for Var {
@@ -104,21 +115,26 @@ impl Display for Var {
     }
 }
 
-enum Query {
-    Pattern(Pattern),
-    And(Box<Query>, Box<Query>),
-    Or(Box<Query>, Box<Query>)
+struct Query {
+    find: Vec<Var>,
+    where_: Where,
 }
 
-impl Query {
-    fn and(l: Query, r: Query) -> Self {
+enum Where {
+    Pattern(Pattern),
+    And(Box<Where>, Box<Where>),
+    Or(Box<Where>, Box<Where>),
+}
+
+impl Where {
+    fn and(l: Where, r: Where) -> Self {
         Self::And(Box::new(l), Box::new(r))
     }
 }
 
 enum Entry<T> {
     Lit(T),
-    Var(Var)
+    Var(Var),
 }
 
 impl<T: Display> Display for Entry<T> {
@@ -131,7 +147,7 @@ impl<T: Display> Display for Entry<T> {
 }
 
 impl<T: Data> Entry<T> {
-    fn match_part(&self, frame: &mut Frame, data: T) -> Result<(), ()> {
+    fn match_(&self, frame: &mut Frame, data: T) -> Result<(), ()> {
         match self {
             Entry::Lit(lit) => {
                 if *lit == data {
@@ -163,10 +179,10 @@ struct Pattern {
 }
 
 impl Pattern {
-    fn match_pattern(&self, frame: &mut Frame, datom: Datom) -> Result<(), ()> {
-        self.e.match_part(frame, datom.e)?;
-        self.a.match_part(frame, datom.a)?;
-        self.v.match_part(frame, datom.v)?;
+    fn match_(&self, frame: &mut Frame, datom: Datom) -> Result<(), ()> {
+        self.e.match_(frame, datom.e)?;
+        self.a.match_(frame, datom.a)?;
+        self.v.match_(frame, datom.v)?;
         Ok(())
     }
 }
@@ -187,20 +203,20 @@ impl Display for BoundValue {
             BoundValue::Attribute(Attribute(a)) => {
                 write!(f, ":")?;
                 (*a).fmt(f)
-            },
+            }
             BoundValue::Value(v) => (*v).fmt(f),
         }
     }
 }
 
 struct Frame {
-    bound: HashMap<Var, BoundValue>
+    bound: HashMap<Var, BoundValue>,
 }
 
 impl Frame {
     fn new() -> Self {
         Frame {
-            bound: HashMap::new()
+            bound: HashMap::new(),
         }
     }
 
@@ -230,17 +246,57 @@ impl Frame {
     }
 }
 
+// Macros
+
+macro_rules! parse_var {
+    (? $var:ident) => {
+        Var(stringify!($var).to_string())
+    };
+}
+
+macro_rules! parse_attr {
+    (: $($var:tt)+) => {
+        Attribute(stringify!($($var)+).to_string())
+    };
+}
+
+macro_rules! parse_val {
+    ($val:expr) => {
+        Value::from($val)
+    };
+}
+
+macro_rules! datom {
+    [ $e:expr, :$a:ident $( / $b:ident )*, $v:expr ] => {
+        Datom {
+            e: Entity($e),
+            a: Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string()),
+            v: Value::from($v),
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn store() -> Store {
         Store {
-            data: vec![
-                Datom::str(100, "name", "Moritz"),
-                Datom::flt(100, "age", 39.),
-            ]
+            data: vec![datom![100, :name, "Moritz"], datom![100, :age, 39.]],
         }
+    }
+
+    #[test]
+    fn macro_datom() {
+        let datom = datom![10 + 10, :person/name, "M"];
+        assert_eq!(
+            datom,
+            Datom {
+                e: Entity(20),
+                a: Attribute("person/name".to_string()),
+                v: Value::Str("M".to_string()),
+            }
+        )
     }
 
     #[test]
@@ -252,12 +308,18 @@ mod tests {
         };
 
         let mut frame = Frame::new();
-        pattern.match_pattern(&mut frame, Datom::str(100, "name", "Moritz")).unwrap();
+        pattern
+            .match_(&mut frame, datom![100, :name, "Moritz"])
+            .unwrap();
         let row = frame.row(&[Var("a".to_string())]).unwrap();
         assert_eq!(row, vec![BoundValue::Entity(Entity(100))]);
 
-        assert!(pattern.match_pattern(&mut frame, Datom::flt(100, "name", 1.0)).is_err());
-        assert!(pattern.match_pattern(&mut frame, Datom::str(100, "name", "Moritz")).is_ok());
-        assert!(pattern.match_pattern(&mut frame, Datom::str(200, "name", "Moritz")).is_err());
+        assert!(pattern.match_(&mut frame, datom![100, :name, 1.0]).is_err());
+        assert!(pattern
+            .match_(&mut frame, datom![100, :name, "Moritz"])
+            .is_ok());
+        assert!(pattern
+            .match_(&mut frame, datom![200, :name, "Moritz"])
+            .is_err());
     }
 }
