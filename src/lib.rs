@@ -115,11 +115,13 @@ impl Display for Var {
     }
 }
 
+#[derive(Debug, PartialEq)]
 struct Query {
     find: Vec<Var>,
     where_: Where,
 }
 
+#[derive(Debug, PartialEq)]
 enum Where {
     Pattern(Pattern),
     And(Box<Where>, Box<Where>),
@@ -130,8 +132,13 @@ impl Where {
     fn and(l: Where, r: Where) -> Self {
         Self::And(Box::new(l), Box::new(r))
     }
+
+    fn or(l: Where, r: Where) -> Self {
+        Self::Or(Box::new(l), Box::new(r))
+    }
 }
 
+#[derive(Debug, PartialEq)]
 enum Entry<T> {
     Lit(T),
     Var(Var),
@@ -172,6 +179,7 @@ impl<T: Data> Entry<T> {
     }
 }
 
+#[derive(Debug, PartialEq)]
 struct Pattern {
     e: Entry<Entity>,
     a: Entry<Attribute>,
@@ -248,26 +256,94 @@ impl Frame {
 
 // Macros
 
-macro_rules! parse_var {
-    (? $var:ident) => {
-        Var(stringify!($var).to_string())
-    };
+macro_rules! query {
+    {
+        find: [ $(?$var:ident),* ],
+        where: [ $($where_:tt)+ ]
+    } => {{
+        let exprs = vec![$(where_!($where_)),*];
+        let mut iter = exprs.into_iter();
+        let first = iter.next().unwrap();
+        Query {
+            find: vec![$(Var(stringify!($var).to_string()), )*],
+            where_: iter.fold(first, |acc, e| Where::and(acc, e))
+        }
+    }};
 }
 
-macro_rules! parse_attr {
-    (: $($var:tt)+) => {
-        Attribute(stringify!($($var)+).to_string())
+macro_rules! where_ {
+    ([ $e:expr, :$a:ident$(/$b:ident)* $v:expr ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Lit(Entity($e)),
+            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
+            v: Entry::Lit(Value::from($v)),
+        })
     };
-}
-
-macro_rules! parse_val {
-    ($val:expr) => {
-        Value::from($val)
+    ([ $e:expr, :$a:ident$(/$b:ident)* ?$v:ident ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Lit(Entity($e)),
+            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
+            v: Entry::Var(Var(stringify!($v).to_string())),
+        })
     };
+    ([ $e:expr, ?$a:ident $v:expr ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Lit(Entity($e)),
+            a: Entry::Var(Var(stringify!($a).to_string())),
+            v: Entry::Lit(Value::from($v)),
+        })
+    };
+    ([ $e:expr, ?$a:ident ?$v:ident ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Lit(Entity($e)),
+            a: Entry::Var(Var(stringify!($a).to_string())),
+            v: Entry::Var(Var(stringify!($v).to_string())),
+        })
+    };
+    ([ ?$e:ident, :$a:ident$(/$b:ident)* $v:expr ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Var(Var(stringify!($e).to_string())),
+            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
+            v: Entry::Lit(Value::from($v)),
+        })
+    };
+    ([ ?$e:ident, :$a:ident$(/$b:ident)* ?$v:ident ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Var(Var(stringify!($e).to_string())),
+            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
+            v: Entry::Var(Var(stringify!($v).to_string())),
+        })
+    };
+    ([ ?$e:ident, ?$a:ident $v:expr ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Var(Var(stringify!($e).to_string())),
+            a: Entry::Var(Var(stringify!($a).to_string())),
+            v: Entry::Lit(Value::from($v)),
+        })
+    };
+    ([ ?$e:ident, ?$a:ident ?$v:ident ]) => {
+        Where::Pattern(Pattern {
+            e: Entry::Var(Var(stringify!($e).to_string())),
+            a: Entry::Var(Var(stringify!($a).to_string())),
+            v: Entry::Var(Var(stringify!($v).to_string())),
+        })
+    };
+    ((or $($clause:tt)+)) => {{
+        let exprs = vec![$(where_!($clause)),*];
+        let mut iter = exprs.into_iter();
+        let first = iter.next().unwrap();
+        iter.fold(first, |acc, e| Where::or(acc, e))
+    }};
+    ((and $($clause:tt)+)) => {{
+        let exprs = vec![$(where_!($clause)),*];
+        let mut iter = exprs.into_iter();
+        let first = iter.next().unwrap();
+        iter.fold(first, |acc, e| Where::and(acc, e))
+    }};
 }
 
 macro_rules! datom {
-    [ $e:expr, :$a:ident $( / $b:ident )*, $v:expr ] => {
+    [ $e:expr, :$a:ident$(/$b:ident)* $v:expr ] => {
         Datom {
             e: Entity($e),
             a: Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string()),
@@ -282,13 +358,17 @@ mod tests {
 
     fn store() -> Store {
         Store {
-            data: vec![datom![100, :name, "Moritz"], datom![100, :age, 39.]],
+            data: vec![
+                datom![100, :name "Moritz"],
+                datom![100, :age 39],
+                datom![200, :name "Piet"],
+            ],
         }
     }
 
     #[test]
     fn macro_datom() {
-        let datom = datom![10 + 10, :person/name, "M"];
+        let datom = datom![20, :person/name "M"];
         assert_eq!(
             datom,
             Datom {
@@ -297,6 +377,206 @@ mod tests {
                 v: Value::Str("M".to_string()),
             }
         )
+    }
+
+    #[test]
+    fn macro_query() {
+        let expected = Query {
+            find: vec![
+                Var(
+                    "a".to_string(),
+                ),
+                Var(
+                    "b".to_string(),
+                ),
+            ],
+            where_: Where::and(
+                Where::and(
+                    Where::and(
+                        Where::and(
+                            Where::and(
+                                Where::Pattern(
+                                    Pattern {
+                                        e: Entry::Lit(
+                                            Entity(
+                                                3,
+                                            ),
+                                        ),
+                                        a: Entry::Lit(
+                                            Attribute(
+                                                "foo".to_string(),
+                                            ),
+                                        ),
+                                        v: Entry::Lit(
+                                            Value::Float(
+                                                3.0,
+                                            ),
+                                        ),
+                                    },
+                                ),
+                                Where::Pattern(
+                                    Pattern {
+                                        e: Entry::Lit(
+                                            Entity(
+                                                1,
+                                            ),
+                                        ),
+                                        a: Entry::Lit(
+                                            Attribute(
+                                                "bar".to_string(),
+                                            ),
+                                        ),
+                                        v: Entry::Var(
+                                            Var(
+                                                "a".to_string(),
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                            Where::Pattern(
+                                Pattern {
+                                    e: Entry::Lit(
+                                        Entity(
+                                            0,
+                                        ),
+                                    ),
+                                    a: Entry::Var(
+                                        Var(
+                                            "b".to_string(),
+                                        ),
+                                    ),
+                                    v: Entry::Lit(
+                                        Value::Str(
+                                            "M".to_string(),
+                                        ),
+                                    ),
+                                },
+                            ),
+                        ),
+                        Where::Pattern(
+                            Pattern {
+                                e: Entry::Lit(
+                                    Entity(
+                                        0,
+                                    ),
+                                ),
+                                a: Entry::Var(
+                                    Var(
+                                        "b".to_string(),
+                                    ),
+                                ),
+                                v: Entry::Var(
+                                    Var(
+                                        "a".to_string(),
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                    Where::or(
+                        Where::Pattern(
+                            Pattern {
+                                e: Entry::Var(
+                                    Var(
+                                        "x".to_string(),
+                                    ),
+                                ),
+                                a: Entry::Lit(
+                                    Attribute(
+                                        "foo".to_string(),
+                                    ),
+                                ),
+                                v: Entry::Lit(
+                                    Value::Float(
+                                        3.0,
+                                    ),
+                                ),
+                            },
+                        ),
+                        Where::Pattern(
+                            Pattern {
+                                e: Entry::Var(
+                                    Var(
+                                        "x".to_string(),
+                                    ),
+                                ),
+                                a: Entry::Lit(
+                                    Attribute(
+                                        "bar".to_string(),
+                                    ),
+                                ),
+                                v: Entry::Var(
+                                    Var(
+                                        "a".to_string(),
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                ),
+                Where::and(
+                    Where::Pattern(
+                        Pattern {
+                            e: Entry::Var(
+                                Var(
+                                    "x".to_string(),
+                                ),
+                            ),
+                            a: Entry::Var(
+                                Var(
+                                    "b".to_string(),
+                                ),
+                            ),
+                            v: Entry::Lit(
+                                Value::Str(
+                                    "M".to_string(),
+                                ),
+                            ),
+                        },
+                    ),
+                    Where::Pattern(
+                        Pattern {
+                            e: Entry::Var(
+                                Var(
+                                    "x".to_string(),
+                                ),
+                            ),
+                            a: Entry::Var(
+                                Var(
+                                    "b".to_string(),
+                                ),
+                            ),
+                            v: Entry::Var(
+                                Var(
+                                    "a".to_string(),
+                                ),
+                            ),
+                        },
+                    ),
+                ),
+            ),
+        };
+
+        let actual = query! {
+            find: [ ?a, ?b],
+            where: [
+                [3, :foo 3]
+                [1, :bar ?a]
+                [0, ?b "M"]
+                [0, ?b ?a]
+                (or
+                    [?x, :foo 3]
+                    [?x, :bar ?a]
+                )
+                (and
+                    [?x, ?b "M"]
+                    [?x, ?b ?a]
+                )
+            ]
+        };
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -309,17 +589,17 @@ mod tests {
 
         let mut frame = Frame::new();
         pattern
-            .match_(&mut frame, datom![100, :name, "Moritz"])
+            .match_(&mut frame, datom![100, :name "Moritz"])
             .unwrap();
         let row = frame.row(&[Var("a".to_string())]).unwrap();
         assert_eq!(row, vec![BoundValue::Entity(Entity(100))]);
 
-        assert!(pattern.match_(&mut frame, datom![100, :name, 1.0]).is_err());
+        assert!(pattern.match_(&mut frame, datom![100, :name 1]).is_err());
         assert!(pattern
-            .match_(&mut frame, datom![100, :name, "Moritz"])
+            .match_(&mut frame, datom![100, :name "Moritz"])
             .is_ok());
         assert!(pattern
-            .match_(&mut frame, datom![200, :name, "Moritz"])
+            .match_(&mut frame, datom![200, :name "Moritz"])
             .is_err());
     }
 }
