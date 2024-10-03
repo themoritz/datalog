@@ -2,7 +2,10 @@
 
 // Store
 
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Display,
+};
 
 trait Data: PartialEq + Clone {
     fn compare_to_bound(&self, bound: &BoundValue) -> bool;
@@ -187,7 +190,41 @@ impl Where {
                 })
             })),
             Where::And(left, right) => right.qeval(store, left.qeval(store, frames)),
-            _ => todo!(),
+            Where::Or(left, right) => Box::new(QevalOr {
+                inner: frames,
+                store,
+                left,
+                right,
+                queue: VecDeque::new(),
+            }),
+        }
+    }
+}
+
+struct QevalOr<'a, I> {
+    inner: I,
+    store: &'a Store,
+    left: &'a Box<Where>,
+    right: &'a Box<Where>,
+    queue: VecDeque<Frame>,
+}
+
+impl<'a, I: Iterator<Item = Frame>> Iterator for QevalOr<'a, I> {
+    type Item = Frame;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(frame) = self.queue.pop_front() {
+            Some(frame)
+        } else {
+            if let Some(frame) = self.inner.next() {
+                let left_frames = self.left.qeval(self.store, vec![frame.clone()].into_iter());
+                let right_frames = self.right.qeval(self.store, vec![frame].into_iter());
+                self.queue.extend(left_frames);
+                self.queue.extend(right_frames);
+                self.next()
+            } else {
+                None
+            }
         }
     }
 }
@@ -522,6 +559,8 @@ mod tests {
             data: vec![
                 datom![100, :name "Moritz"],
                 datom![100, :age 39],
+                datom![150, :name "Moritz"],
+                datom![150, :age 30],
                 datom![200, :name "Piet"],
                 datom![200, :age 39],
             ],
@@ -536,6 +575,22 @@ mod tests {
                 [?p, :name "Moritz"]
                 [?p, :name ?name]
                 [?p, :age 39]
+            ]
+        };
+
+        q.print_result(&store());
+    }
+
+    #[test]
+    fn qeval_or() {
+        let q = query! {
+            find: [?e],
+            where: [
+                (or
+                    [?e, :name "Piet"]
+                    [?e, :name "Moritz"]
+                )
+                [?e, :age 39]
             ]
         };
 
