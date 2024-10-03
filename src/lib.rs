@@ -1,5 +1,7 @@
 #![allow(dead_code, unused_macros)]
 
+mod movies;
+
 // Store
 
 use std::{
