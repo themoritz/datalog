@@ -10,19 +10,19 @@ use std::{
 };
 
 trait Data: PartialEq + Clone {
-    fn compare_to_bound(&self, bound: &BoundValue) -> bool {
+    fn compare_to_bound(&self, bound: &Value) -> bool {
         self.clone().embed() == *bound
     }
 
-    fn embed(self) -> BoundValue;
+    fn embed(self) -> Value;
 }
 
 #[derive(PartialEq, Clone, Debug)]
 struct Entity(u64);
 
 impl Data for Entity {
-    fn embed(self) -> BoundValue {
-        BoundValue::Entity(self)
+    fn embed(self) -> Value {
+        Value::Int(self.0)
     }
 }
 
@@ -30,8 +30,8 @@ impl Data for Entity {
 struct Attribute(String);
 
 impl Data for Attribute {
-    fn embed(self) -> BoundValue {
-        BoundValue::Attribute(self)
+    fn embed(self) -> Value {
+        Value::Str(self.0)
     }
 }
 
@@ -71,8 +71,8 @@ impl Display for Value {
 }
 
 impl Data for Value {
-    fn embed(self) -> BoundValue {
-        BoundValue::Value(self)
+    fn embed(self) -> Value {
+        self
     }
 }
 
@@ -115,7 +115,7 @@ struct Query {
 }
 
 impl Query {
-    fn qeval(&self, store: &Store) -> Result<Vec<Vec<BoundValue>>, String> {
+    fn qeval(&self, store: &Store) -> Result<Vec<Vec<Value>>, String> {
         let frame_iter = self.where_.qeval(store, vec![Frame::new()].into_iter());
         frame_iter.map(|frame| frame.row(&self.find)).collect()
     }
@@ -274,41 +274,9 @@ impl Pattern {
 
 // Frame
 
-#[derive(Clone, Debug)]
-enum BoundValue {
-    Entity(Entity),
-    Attribute(Attribute),
-    Value(Value),
-}
-
-impl PartialEq for BoundValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (BoundValue::Entity(Entity(e)), BoundValue::Value(Value::Int(v))) => e == v,
-            (BoundValue::Value(Value::Int(v)), BoundValue::Entity(Entity(e))) => e == v,
-            (BoundValue::Attribute(Attribute(a)), BoundValue::Value(Value::Str(v))) => a == v,
-            (BoundValue::Value(Value::Str(v)), BoundValue::Attribute(Attribute(a))) => a == v,
-            (BoundValue::Entity(e1), BoundValue::Entity(e2)) => e1 == e2,
-            (BoundValue::Attribute(a1), BoundValue::Attribute(a2)) => a1 == a2,
-            (BoundValue::Value(v1), BoundValue::Value(v2)) => v1 == v2,
-            _ => false,
-        }
-    }
-}
-
-impl Display for BoundValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BoundValue::Entity(Entity(e)) => (*e).fmt(f),
-            BoundValue::Attribute(Attribute(a)) => (":".to_string() + a).fmt(f),
-            BoundValue::Value(v) => (*v).fmt(f),
-        }
-    }
-}
-
 #[derive(Clone)]
 struct Frame {
-    bound: HashMap<Var, BoundValue>,
+    bound: HashMap<Var, Value>,
 }
 
 impl Frame {
@@ -318,11 +286,11 @@ impl Frame {
         }
     }
 
-    fn bind(&mut self, v: Var, val: BoundValue) {
+    fn bind(&mut self, v: Var, val: Value) {
         self.bound.insert(v, val);
     }
 
-    fn row(&self, vars: &[Var]) -> Result<Vec<BoundValue>, String> {
+    fn row(&self, vars: &[Var]) -> Result<Vec<Value>, String> {
         let mut result = Vec::new();
         for v in vars {
             if let Some(val) = self.bound.get(v) {
@@ -546,7 +514,7 @@ mod tests {
             .match_(&mut frame, &datom![100, :name "Moritz"])
             .unwrap();
         let row = frame.row(&[Var("a".to_string())]).unwrap();
-        assert_eq!(row, vec![BoundValue::Entity(Entity(100))]);
+        assert_eq!(row, vec![Value::Int(100)]);
 
         assert!(pattern.match_(&mut frame, &datom![100, :name 1]).is_err());
         assert!(pattern
@@ -611,7 +579,7 @@ mod tests {
         };
 
         let result = q.qeval(&STORE).unwrap();
-        assert_eq!(result, vec![vec![BoundValue::Value(Value::Float(1979.))]]);
+        assert_eq!(result, vec![vec![Value::Int(1979)]]);
     }
 
     #[test]
