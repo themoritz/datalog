@@ -10,7 +10,10 @@ use std::{
 };
 
 trait Data: PartialEq + Clone {
-    fn compare_to_bound(&self, bound: &BoundValue) -> bool;
+    fn compare_to_bound(&self, bound: &BoundValue) -> bool {
+        self.clone().embed() == *bound
+    }
+
     fn embed(self) -> BoundValue;
 }
 
@@ -18,13 +21,6 @@ trait Data: PartialEq + Clone {
 struct Entity(u64);
 
 impl Data for Entity {
-    fn compare_to_bound(&self, bound: &BoundValue) -> bool {
-        match bound {
-            BoundValue::Entity(e) => e == self,
-            _ => false,
-        }
-    }
-
     fn embed(self) -> BoundValue {
         BoundValue::Entity(self)
     }
@@ -34,13 +30,6 @@ impl Data for Entity {
 struct Attribute(String);
 
 impl Data for Attribute {
-    fn compare_to_bound(&self, bound: &BoundValue) -> bool {
-        match bound {
-            BoundValue::Attribute(a) => a == self,
-            _ => false,
-        }
-    }
-
     fn embed(self) -> BoundValue {
         BoundValue::Attribute(self)
     }
@@ -50,6 +39,7 @@ impl Data for Attribute {
 enum Value {
     Str(String),
     Float(f64),
+    Int(u64),
 }
 
 impl From<f64> for Value {
@@ -60,7 +50,7 @@ impl From<f64> for Value {
 
 impl From<u64> for Value {
     fn from(value: u64) -> Self {
-        Self::Float(value as f64)
+        Self::Int(value)
     }
 }
 
@@ -75,18 +65,12 @@ impl Display for Value {
         match self {
             Value::Str(s) => s.fmt(f),
             Value::Float(x) => x.fmt(f),
+            Value::Int(x) => x.fmt(f),
         }
     }
 }
 
 impl Data for Value {
-    fn compare_to_bound(&self, bound: &BoundValue) -> bool {
-        match bound {
-            BoundValue::Value(v) => v == self,
-            _ => false,
-        }
-    }
-
     fn embed(self) -> BoundValue {
         BoundValue::Value(self)
     }
@@ -140,16 +124,16 @@ impl Query {
         match self.qeval(store) {
             Ok(table) => {
                 for var in &self.find {
-                    print!("{:>10}", var);
+                    print!("{:>25}", var);
                 }
                 println!();
                 for _ in &self.find {
-                    print!("----------");
+                    print!("-------------------------");
                 }
                 println!();
                 for row in table {
                     for val in row {
-                        print!("{:>10}", val);
+                        print!("{:>25}", val);
                     }
                     println!();
                 }
@@ -290,11 +274,26 @@ impl Pattern {
 
 // Frame
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug)]
 enum BoundValue {
     Entity(Entity),
     Attribute(Attribute),
     Value(Value),
+}
+
+impl PartialEq for BoundValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BoundValue::Entity(Entity(e)), BoundValue::Value(Value::Int(v))) => e == v,
+            (BoundValue::Value(Value::Int(v)), BoundValue::Entity(Entity(e))) => e == v,
+            (BoundValue::Attribute(Attribute(a)), BoundValue::Value(Value::Str(v))) => a == v,
+            (BoundValue::Value(Value::Str(v)), BoundValue::Attribute(Attribute(a))) => a == v,
+            (BoundValue::Entity(e1), BoundValue::Entity(e2)) => e1 == e2,
+            (BoundValue::Attribute(a1), BoundValue::Attribute(a2)) => a1 == a2,
+            (BoundValue::Value(v1), BoundValue::Value(v2)) => v1 == v2,
+            _ => false,
+        }
+    }
 }
 
 impl Display for BoundValue {
@@ -436,6 +435,8 @@ macro_rules! datom {
 
 #[cfg(test)]
 mod tests {
+    use movies::STORE;
+
     use super::*;
 
     #[test]
@@ -597,5 +598,45 @@ mod tests {
         };
 
         q.print_result(&store());
+    }
+
+    #[test]
+    fn movies_alien() {
+        let q = query! {
+            find: [?year],
+            where: [
+              [?id, :movie/title "Alien"]
+              [?id, :movie/year ?year]
+            ]
+        };
+
+        let result = q.qeval(&STORE).unwrap();
+        assert_eq!(result, vec![vec![BoundValue::Value(Value::Float(1979.))]]);
+    }
+
+    #[test]
+    fn movies_200() {
+        let q = query! {
+            find: [?attr, ?value],
+            where: [
+                [200, ?attr ?value]
+            ]
+        };
+    }
+
+    #[test]
+    fn movies_arnold() {
+        let q = query! {
+            find: [?directorName, ?movieTitle],
+            where: [
+                [?arnoldId, :person/name "Arnold Schwarzenegger"]
+                [?movieId, :movie/cast ?arnoldId]
+                [?movieId, :movie/title ?movieTitle]
+                [?movieId, :movie/director ?directorId]
+                [?directorId, :person/name ?directorName]
+            ]
+        };
+
+        q.print_result(&STORE);
     }
 }

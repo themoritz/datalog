@@ -14,7 +14,7 @@ macro_rules! datom {
 }
 
 lazy_static::lazy_static! {
-    static ref STORE: Store = Store { data: vec![
+    pub(crate) static ref STORE: Store = Store { data: vec![
         datom![100, :person/name "James Cameron"],
         datom![100, :person/born "1954-08-16T00:00:00Z"],
         datom![101, :person/name "Arnold Schwarzenegger"],
