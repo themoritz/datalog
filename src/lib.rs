@@ -3,6 +3,8 @@
 
 pub mod movies;
 
+type Result<T> = core::result::Result<T, String>;
+
 // Store
 
 use std::{
@@ -20,7 +22,7 @@ pub trait Data: PartialEq + Clone {
     fn embed(self) -> Value;
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug)]
 pub struct Entity(pub u64);
 
 impl Entity {
@@ -39,20 +41,8 @@ impl Data for Entity {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct Attribute(pub String);
-
-impl Attribute {
-    fn min() -> Self {
-        Attribute("".to_string())
-    }
-
-    fn next(&self) -> Self {
-        let mut a = self.0.clone();
-        a.push('\0');
-        Attribute(a)
-    }
-}
 
 impl Data for Attribute {
     fn embed(self) -> Value {
@@ -127,111 +117,123 @@ struct Datom {
     v: Value,
 }
 
-impl From<Datom> for DatomAEV {
-    fn from(value: Datom) -> Self {
-        DatomAEV {
-            a: value.a,
-            e: value.e,
-            v: value.v,
-        }
-    }
-}
-
-impl From<Datom> for DatomAVE {
-    fn from(value: Datom) -> Self {
-        DatomAVE {
-            a: value.a,
-            v: value.v,
-            e: value.e,
-        }
-    }
-}
-
-impl From<DatomAEV> for Datom {
-    fn from(value: DatomAEV) -> Self {
-        Datom {
-            e: value.e,
-            a: value.a,
-            v: value.v,
-        }
-    }
-}
-
-impl From<DatomAVE> for Datom {
-    fn from(value: DatomAVE) -> Self {
-        Datom {
-            e: value.e,
-            a: value.a,
-            v: value.v,
-        }
-    }
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
-struct DatomAEV {
-    a: Attribute,
+struct EAV {
     e: Entity,
+    a: Entity,
     v: Value,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
-struct DatomAVE {
-    a: Attribute,
+struct AVE {
+    a: Entity,
     v: Value,
     e: Entity,
+}
+
+impl From<AVE> for EAV {
+    fn from(value: AVE) -> Self {
+        EAV {
+            e: value.e,
+            a: value.a,
+            v: value.v,
+        }
+    }
 }
 
 pub struct Store {
-    eav: BTreeSet<Datom>,
-    aev: BTreeSet<DatomAEV>, // TODO: In what situations do I need this?
-    ave: BTreeSet<DatomAVE>,
-    // TODO: vae for graph traversals?
+    schema: Schema,
+    eav: BTreeSet<EAV>,
+    ave: BTreeSet<AVE>,
+    next_id: u64,
+    next_tx: u64,
 }
 
 impl Store {
     pub fn new() -> Self {
         Store {
+            schema: Schema::new(),
             eav: BTreeSet::new(),
-            aev: BTreeSet::new(),
             ave: BTreeSet::new(),
+            next_id: 1,
+            next_tx: 1,
         }
     }
 
-    fn insert(&mut self, datom: Datom) {
-        self.eav.insert(datom.clone());
-        self.aev.insert(datom.clone().into());
-        self.ave.insert(datom.into());
+    fn add_attribute(&mut self, name: &str, type_: Type, cardinality: Cardinality) -> Result<()> {
+        let a = Attribute(name.to_string());
+        if self.schema.details.contains_key(&a) {
+            return Err("Attribute already defined".to_string());
+        }
+
+        self.schema.ids.insert(a.clone(), Entity(self.next_id));
+        self.schema
+            .attributes
+            .insert(Entity(self.next_id), a.clone());
+        self.next_id += 1;
+
+        let details = AttributeDetails { type_, cardinality };
+        self.schema.details.insert(a, details);
+
+        Ok(())
     }
 
-    fn into_iter(&self) -> impl Iterator<Item = Datom> {
+    fn insert(&mut self, datom: Datom) -> Result<()> {
+        let a = match self.schema.get_id(&datom.a) {
+            Some(id) => Ok(id),
+            None => Err(format!("Could not find id for attribute `{}`", datom.a.0)),
+        }?;
+
+        if !self.schema.valid_type(&datom.a, &datom.v) {
+            return Err(format!(
+                "Invalid type for attribute `{}`: {:?}",
+                datom.a.0, datom.v
+            ));
+        }
+
+        self.eav.insert(EAV {
+            e: datom.e,
+            a,
+            v: datom.v.clone(),
+        });
+        self.ave.insert(AVE {
+            a,
+            v: datom.v.clone(),
+            e: datom.e,
+        });
+
+        Ok(())
+    }
+
+    fn into_iter(&self) -> impl Iterator<Item = EAV> {
         self.eav.clone().into_iter()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &Datom> + '_ {
+    fn iter(&self) -> impl Iterator<Item = &EAV> + '_ {
         self.eav.iter()
     }
 
-    fn iter_entity(&self, e: Entity) -> impl Iterator<Item = Datom> + '_ {
-        let min = Datom {
+    fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_ {
+        let min = EAV {
             e,
-            a: Attribute::min(),
+            a: Entity::min(),
             v: Value::min(),
         };
-        let max = Datom {
+        let max = EAV {
             e: e.next(),
-            a: Attribute::min(),
+            a: Entity::min(),
             v: Value::min(),
         };
         self.eav.range(min..max).map(|eav| eav.clone().into())
     }
 
-    fn iter_entity_attribute(&self, e: Entity, a: Attribute) -> impl Iterator<Item = Datom> + '_ {
-        let min = Datom {
+    fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_ {
+        let min = EAV {
             e,
             a: a.clone(),
             v: Value::min(),
         };
-        let max = Datom {
+        let max = EAV {
             e,
             a: a.next(),
             v: Value::min(),
@@ -239,28 +241,118 @@ impl Store {
         self.eav.range(min..max).map(|eav| eav.clone().into())
     }
 
-    fn iter_attribute_value(&self, a: Attribute, v: Value) -> impl Iterator<Item = Datom> + '_ {
-        let min = DatomAVE {
+    fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_ {
+        let min = AVE {
             a: a.clone(),
             v: v.clone(),
             e: Entity::min(),
         };
-        let max = DatomAVE {
+        let max = AVE {
             a: a.clone(),
             v: v.next(),
             e: Entity::min(),
         };
         self.ave.range(min..max).map(|ave| ave.clone().into())
     }
+
+    fn resolve_pattern(&self, p: &Pattern<Attribute>) -> Result<Pattern<Entity>> {
+        let a = match &p.a {
+            Entry::Var(v) => Ok(Entry::Var(v.clone())),
+            Entry::Lit(a) => {
+                if let Some(id) = self.schema.get_id(&a) {
+                    Ok(Entry::Lit(id))
+                } else {
+                    Err("Id not found".to_string())
+                }
+            }
+        }?;
+
+        Ok(Pattern {
+            e: p.e.clone(),
+            a,
+            v: p.v.clone(),
+        })
+    }
+
+    fn resolve_where(&self, whr: &Where<Attribute>) -> Result<Where<Entity>> {
+        match whr {
+            Where::Pattern(p) => Ok(Where::Pattern(self.resolve_pattern(&p)?)),
+            Where::And(l, r) => Ok(Where::and(self.resolve_where(l)?, self.resolve_where(r)?)),
+            Where::Or(l, r) => Ok(Where::or(self.resolve_where(l)?, self.resolve_where(r)?)),
+        }
+    }
+
+    fn resolve_result(&self, table: HashSet<Vec<Value>>) -> HashSet<Vec<Value>> {
+        table
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|val| {
+                        if let Value::Int(i) = val {
+                            if let Some(Attribute(a)) = self.schema.attributes.get(&Entity(i)) {
+                                Value::Str(a.clone())
+                            } else {
+                                val
+                            }
+                        } else {
+                            val
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
 }
 
-impl FromIterator<Datom> for Store {
-    fn from_iter<T: IntoIterator<Item = Datom>>(iter: T) -> Self {
-        let mut s = Self::new();
-        for datom in iter {
-            s.insert(datom);
+#[derive(Clone, Copy)]
+pub enum Type {
+    Int,
+    Ref,
+    Float,
+    Str,
+}
+
+pub enum Cardinality {
+    One,
+    Many,
+}
+
+pub struct AttributeDetails {
+    type_: Type,
+    cardinality: Cardinality,
+}
+
+pub struct Schema {
+    details: HashMap<Attribute, AttributeDetails>,
+    ids: HashMap<Attribute, Entity>,
+    attributes: HashMap<Entity, Attribute>,
+}
+
+impl Schema {
+    fn new() -> Self {
+        Schema {
+            details: HashMap::new(),
+            ids: HashMap::new(),
+            attributes: HashMap::new(),
         }
-        s
+    }
+
+    fn get_id(&self, a: &Attribute) -> Option<Entity> {
+        self.ids.get(a).copied()
+    }
+
+    fn valid_type(&self, a: &Attribute, v: &Value) -> bool {
+        if let Some(details) = self.details.get(a) {
+            match (details.type_, v) {
+                (Type::Int, Value::Int(_)) => true,
+                (Type::Ref, Value::Int(_)) => true,
+                (Type::Float, Value::Float(_)) => true,
+                (Type::Str, Value::Str(_)) => true,
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 }
 
@@ -278,12 +370,13 @@ impl Display for Var {
 #[derive(Debug, PartialEq)]
 pub struct Query {
     pub find: Vec<Var>,
-    pub where_: Where,
+    pub where_: Where<Attribute>,
 }
 
 impl Query {
-    pub fn qeval(&self, store: &Store) -> Result<HashSet<Vec<Value>>, String> {
-        let frame_iter = self.where_.qeval(store, vec![Frame::new()].into_iter());
+    pub fn qeval(&self, store: &Store) -> Result<HashSet<Vec<Value>>> {
+        let resolved_where = store.resolve_where(&self.where_)?;
+        let frame_iter = resolved_where.qeval(store, vec![Frame::new()].into_iter());
         frame_iter.map(|frame| frame.row(&self.find)).collect()
     }
 
@@ -311,21 +404,23 @@ impl Query {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Where {
-    Pattern(Pattern),
-    And(Box<Where>, Box<Where>),
-    Or(Box<Where>, Box<Where>),
+pub enum Where<T> {
+    Pattern(Pattern<T>),
+    And(Box<Where<T>>, Box<Where<T>>),
+    Or(Box<Where<T>>, Box<Where<T>>),
 }
 
-impl Where {
-    pub fn and(l: Where, r: Where) -> Self {
+impl<T> Where<T> {
+    pub fn and(l: Where<T>, r: Where<T>) -> Self {
         Self::And(Box::new(l), Box::new(r))
     }
 
-    pub fn or(l: Where, r: Where) -> Self {
+    pub fn or(l: Where<T>, r: Where<T>) -> Self {
         Self::Or(Box::new(l), Box::new(r))
     }
+}
 
+impl Where<Entity> {
     fn qeval<'a>(
         &'a self,
         store: &'a Store,
@@ -352,12 +447,12 @@ impl Where {
 }
 
 enum Candidates<'a> {
-    Lazy(Box<dyn Iterator<Item = &'a Datom> + 'a>),
-    Strict(Box<dyn Iterator<Item = Datom> + 'a>),
+    Lazy(Box<dyn Iterator<Item = &'a EAV> + 'a>),
+    Strict(Box<dyn Iterator<Item = EAV> + 'a>),
 }
 
 struct PatternI<'a, I> {
-    pattern: &'a Pattern,
+    pattern: &'a Pattern<Entity>,
     frames: I,
     current_frame: Option<Frame>,
     store: &'a Store,
@@ -365,7 +460,7 @@ struct PatternI<'a, I> {
 }
 
 impl<'a, I: Iterator<Item = Frame>> PatternI<'a, I> {
-    fn match_(&mut self, mut frame: Frame, datom: &Datom) -> Option<Frame> {
+    fn match_(&mut self, mut frame: Frame, datom: &EAV) -> Option<Frame> {
         if let Ok(()) = self.pattern.match_(&mut frame, datom) {
             Some(frame)
         } else {
@@ -422,8 +517,8 @@ impl<'a, I: Iterator<Item = Frame>> Iterator for PatternI<'a, I> {
 struct OrI<'a, I> {
     inner: I,
     store: &'a Store,
-    left: &'a Box<Where>,
-    right: &'a Box<Where>,
+    left: &'a Box<Where<Entity>>,
+    right: &'a Box<Where<Entity>>,
     queue: VecDeque<Frame>,
 }
 
@@ -447,7 +542,7 @@ impl<'a, I: Iterator<Item = Frame>> Iterator for OrI<'a, I> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Entry<T> {
     Lit(T),
     Var(Var),
@@ -463,13 +558,13 @@ impl<T: Display> Display for Entry<T> {
 }
 
 impl<T: Data> Entry<T> {
-    fn match_(&self, frame: &mut Frame, data: &T) -> Result<(), ()> {
+    fn match_(&self, frame: &mut Frame, data: &T) -> Result<()> {
         match self {
             Entry::Lit(lit) => {
                 if *lit == *data {
                     Ok(())
                 } else {
-                    Err(())
+                    Err("".to_string())
                 }
             }
             Entry::Var(var) => {
@@ -477,7 +572,7 @@ impl<T: Data> Entry<T> {
                     if data.compare_to_bound(bound_value) {
                         Ok(())
                     } else {
-                        Err(())
+                        Err("".to_string())
                     }
                 } else {
                     frame.bind(var.clone(), data.clone().embed());
@@ -489,14 +584,23 @@ impl<T: Data> Entry<T> {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Pattern {
+pub struct Pattern<T> {
     pub e: Entry<Entity>,
-    pub a: Entry<Attribute>,
+    pub a: Entry<T>,
     pub v: Entry<Value>,
 }
 
-impl Pattern {
-    fn match_(&self, frame: &mut Frame, datom: &Datom) -> Result<(), ()> {
+impl Pattern<Attribute> {
+    fn match_(&self, frame: &mut Frame, datom: &Datom) -> Result<()> {
+        self.e.match_(frame, &datom.e)?;
+        self.a.match_(frame, &datom.a)?;
+        self.v.match_(frame, &datom.v)?;
+        Ok(())
+    }
+}
+
+impl Pattern<Entity> {
+    fn match_(&self, frame: &mut Frame, datom: &EAV) -> Result<()> {
         self.e.match_(frame, &datom.e)?;
         self.a.match_(frame, &datom.a)?;
         self.v.match_(frame, &datom.v)?;
@@ -516,13 +620,13 @@ impl Pattern {
         }
     }
 
-    fn attribute_bound(&self, frame: &Frame) -> Option<Attribute> {
+    fn attribute_bound(&self, frame: &Frame) -> Option<Entity> {
         match self.a {
             Entry::Lit(ref a) => Some(a.clone()),
             Entry::Var(ref v) => {
                 let val = frame.bound.get(v)?;
                 match val {
-                    Value::Str(s) => Some(Attribute(s.clone())),
+                    Value::Int(a) => Some(Entity(*a)),
                     _ => None,
                 }
             }
@@ -536,13 +640,13 @@ impl Pattern {
         }
     }
 
-    fn entity_attribute_bound(&self, frame: &Frame) -> Option<(Entity, Attribute)> {
+    fn entity_attribute_bound(&self, frame: &Frame) -> Option<(Entity, Entity)> {
         let e = self.entity_bound(frame)?;
         let a = self.attribute_bound(frame)?;
         Some((e, a))
     }
 
-    fn attribute_value_bound(&self, frame: &Frame) -> Option<(Attribute, Value)> {
+    fn attribute_value_bound(&self, frame: &Frame) -> Option<(Entity, Value)> {
         let a = self.attribute_bound(frame)?;
         let v = self.value_bound(frame)?;
         Some((a, v))
@@ -567,7 +671,7 @@ impl Frame {
         self.bound.insert(v, val);
     }
 
-    fn row(&self, vars: &[Var]) -> Result<Vec<Value>, String> {
+    fn row(&self, vars: &[Var]) -> Result<Vec<Value>> {
         let mut result = Vec::new();
         for v in vars {
             if let Some(val) = self.bound.get(v) {
@@ -818,14 +922,29 @@ mod tests {
     }
 
     fn store() -> Store {
-        Store::from_iter(vec![
+        let mut store = Store::new();
+
+        store
+            .add_attribute("name", Type::Str, Cardinality::One)
+            .unwrap();
+        store
+            .add_attribute("age", Type::Int, Cardinality::One)
+            .unwrap();
+
+        let datoms = vec![
             datom![100, :name "Moritz"],
             datom![100, :age 39],
             datom![150, :name "Moritz"],
             datom![150, :age 30],
             datom![200, :name "Piet"],
             datom![200, :age 39],
-        ])
+        ];
+
+        for datom in datoms {
+            store.insert(datom).unwrap();
+        }
+
+        store
     }
 
     #[test]
@@ -881,7 +1000,7 @@ mod tests {
         };
 
         assert_eq!(
-            q.qeval(&STORE).unwrap(),
+            STORE.resolve_result(q.qeval(&STORE).unwrap()),
             table![
                 ["movie/title", "The Terminator"],
                 ["movie/year", 1984],
@@ -951,7 +1070,7 @@ mod tests {
         };
 
         assert_eq!(
-            q.qeval(&STORE).unwrap(),
+            STORE.resolve_result(q.qeval(&STORE).unwrap()),
             table![
                 ["movie/director"],
                 ["movie/cast"],

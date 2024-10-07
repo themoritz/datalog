@@ -7,7 +7,9 @@
 - [ ] Pull API (and convert into Rust types)
 - [ ] Cache queries
 - [ ] Upserts
-- [ ] Schema + enforce types
-- [ ] Attributes are entities under the hood
+- [x] Schema + enforce types
+- [x] Attributes are entities under the hood
 - [ ] Custom rust predicates
 - [ ] Aggregation functions
+- [ ] Enforce cardinality
+- [ ] Transaction timestamps
