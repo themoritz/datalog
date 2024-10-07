@@ -183,15 +183,16 @@ struct DatomAVE {
 
 pub struct Store {
     eav: BTreeSet<Datom>,
-    aev: BTreeSet<DatomAEV>,
+    aev: BTreeSet<DatomAEV>, // TODO: In what situations do I need this?
     ave: BTreeSet<DatomAVE>,
+    // TODO: vae for graph traversals?
 }
 
 impl Store {
     pub fn new() -> Self {
         Store {
             eav: BTreeSet::new(),
-            aev: BTreeSet::new(), // TODO: In what situations do I need this?
+            aev: BTreeSet::new(),
             ave: BTreeSet::new(),
         }
     }
