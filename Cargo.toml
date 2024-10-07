@@ -5,3 +5,10 @@ edition = "2021"
 
 [dependencies]
 lazy_static = "1.5.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "query"
+harness = false

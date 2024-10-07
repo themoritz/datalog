@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_macros)]
 
-mod movies;
+pub mod movies;
 
 // Store
 
@@ -9,7 +9,7 @@ use std::{
     fmt::Display,
 };
 
-trait Data: PartialEq + Clone {
+pub trait Data: PartialEq + Clone {
     fn compare_to_bound(&self, bound: &Value) -> bool {
         self.clone().embed() == *bound
     }
@@ -18,7 +18,7 @@ trait Data: PartialEq + Clone {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-struct Entity(u64);
+pub struct Entity(pub u64);
 
 impl Data for Entity {
     fn embed(self) -> Value {
@@ -27,7 +27,7 @@ impl Data for Entity {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-struct Attribute(String);
+pub struct Attribute(pub String);
 
 impl Data for Attribute {
     fn embed(self) -> Value {
@@ -36,7 +36,7 @@ impl Data for Attribute {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-enum Value {
+pub enum Value {
     Str(String),
     Float(f64),
     Int(u64),
@@ -83,7 +83,7 @@ struct Datom {
     v: Value,
 }
 
-struct Store {
+pub struct Store {
     data: Vec<Datom>,
 }
 
@@ -100,7 +100,7 @@ impl Store {
 // Query
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-struct Var(String);
+pub struct Var(pub String);
 
 impl Display for Var {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -109,13 +109,13 @@ impl Display for Var {
 }
 
 #[derive(Debug, PartialEq)]
-struct Query {
-    find: Vec<Var>,
-    where_: Where,
+pub struct Query {
+    pub find: Vec<Var>,
+    pub where_: Where,
 }
 
 impl Query {
-    fn qeval(&self, store: &Store) -> Result<Vec<Vec<Value>>, String> {
+    pub fn qeval(&self, store: &Store) -> Result<Vec<Vec<Value>>, String> {
         let frame_iter = self.where_.qeval(store, vec![Frame::new()].into_iter());
         frame_iter.map(|frame| frame.row(&self.find)).collect()
     }
@@ -144,18 +144,18 @@ impl Query {
 }
 
 #[derive(Debug, PartialEq)]
-enum Where {
+pub enum Where {
     Pattern(Pattern),
     And(Box<Where>, Box<Where>),
     Or(Box<Where>, Box<Where>),
 }
 
 impl Where {
-    fn and(l: Where, r: Where) -> Self {
+    pub fn and(l: Where, r: Where) -> Self {
         Self::And(Box::new(l), Box::new(r))
     }
 
-    fn or(l: Where, r: Where) -> Self {
+    pub fn or(l: Where, r: Where) -> Self {
         Self::Or(Box::new(l), Box::new(r))
     }
 
@@ -216,7 +216,7 @@ impl<'a, I: Iterator<Item = Frame>> Iterator for QevalOr<'a, I> {
 }
 
 #[derive(Debug, PartialEq)]
-enum Entry<T> {
+pub enum Entry<T> {
     Lit(T),
     Var(Var),
 }
@@ -257,10 +257,10 @@ impl<T: Data> Entry<T> {
 }
 
 #[derive(Debug, PartialEq)]
-struct Pattern {
-    e: Entry<Entity>,
-    a: Entry<Attribute>,
-    v: Entry<Value>,
+pub struct Pattern {
+    pub e: Entry<Entity>,
+    pub a: Entry<Attribute>,
+    pub v: Entry<Value>,
 }
 
 impl Pattern {
@@ -305,6 +305,7 @@ impl Frame {
 
 // Macros
 
+#[macro_export]
 macro_rules! query {
     {
         find: [ $(?$var:ident),* ],
@@ -320,6 +321,7 @@ macro_rules! query {
     }};
 }
 
+#[macro_export]
 macro_rules! where_ {
     ([ $e:expr, :$a:ident$(/$b:ident)* $v:expr ]) => {
         Where::Pattern(Pattern {
