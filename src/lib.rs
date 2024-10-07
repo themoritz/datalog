@@ -1,4 +1,5 @@
 #![allow(dead_code, unused_macros)]
+#![feature(float_next_up_down)]
 
 pub mod movies;
 
@@ -19,8 +20,18 @@ pub trait Data: PartialEq + Clone {
     fn embed(self) -> Value;
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
 pub struct Entity(pub u64);
+
+impl Entity {
+    fn min() -> Self {
+        Self(0)
+    }
+
+    fn next(&self) -> Self {
+        Entity(self.0 + 1)
+    }
+}
 
 impl Data for Entity {
     fn embed(self) -> Value {
@@ -34,6 +45,12 @@ pub struct Attribute(pub String);
 impl Attribute {
     fn min() -> Self {
         Attribute("".to_string())
+    }
+
+    fn next(&self) -> Self {
+        let mut a = self.0.clone();
+        a.push('\0');
+        Attribute(a)
     }
 }
 
@@ -53,6 +70,18 @@ pub enum Value {
 impl Value {
     fn min() -> Self {
         Value::Int(0)
+    }
+
+    fn next(&self) -> Self {
+        match self {
+            Self::Int(i) => Self::Int(i + 1),
+            Self::Float(f) => Self::Float(NotNan::new(f.to_owned().next_up()).unwrap()),
+            Self::Str(s) => {
+                let mut s2 = s.clone();
+                s2.push('\0');
+                Self::Str(s2)
+            }
+        }
     }
 }
 
@@ -181,18 +210,32 @@ impl Store {
         self.eav.iter()
     }
 
-    fn iter_entity(&self, Entity(e): Entity) -> impl Iterator<Item = Datom> + '_ {
+    fn iter_entity(&self, e: Entity) -> impl Iterator<Item = Datom> + '_ {
         let min = Datom {
-            e: Entity(e),
+            e,
             a: Attribute::min(),
             v: Value::min(),
         };
         let max = Datom {
-            e: Entity(e + 1),
+            e: e.next(),
             a: Attribute::min(),
             v: Value::min(),
         };
         self.eav.range(min..max).map(|eav| eav.clone().into())
+    }
+
+    fn iter_attribute_value(&self, a: Attribute, v: Value) -> impl Iterator<Item = Datom> + '_ {
+        let min = DatomAVE {
+            a: a.clone(),
+            v: v.clone(),
+            e: Entity::min(),
+        };
+        let max = DatomAVE {
+            a: a.clone(),
+            v: v.next(),
+            e: Entity::min(),
+        };
+        self.ave.range(min..max).map(|ave| ave.clone().into())
     }
 }
 
@@ -321,6 +364,11 @@ impl<'a, I: Iterator<Item = Frame>> PatternI<'a, I> {
                 self.current_frame = Some(frame.clone());
                 if let Some(entity) = self.pattern.entity_bound(&frame) {
                     self.candidates = Candidates::Strict(Box::new(self.store.iter_entity(entity)));
+                } else if let Some((attribute, value)) = self.pattern.attribute_value_bound(&frame)
+                {
+                    self.candidates = Candidates::Strict(Box::new(
+                        self.store.iter_attribute_value(attribute, value),
+                    ));
                 } else {
                     self.candidates = Candidates::Lazy(Box::new(self.store.iter()));
                 }
@@ -448,11 +496,31 @@ impl Pattern {
             }
         }
     }
+
+    fn attribute_value_bound(&self, frame: &Frame) -> Option<(Attribute, Value)> {
+        let a = match self.a {
+            Entry::Lit(ref a) => Some(a.clone()),
+            Entry::Var(ref v) => {
+                let val = frame.bound.get(v)?;
+                match val {
+                    Value::Str(s) => Some(Attribute(s.clone())),
+                    _ => None,
+                }
+            }
+        }?;
+
+        let v = match self.v {
+            Entry::Lit(ref v) => Some(v.clone()),
+            Entry::Var(ref v) => frame.bound.get(v).cloned(),
+        }?;
+
+        Some((a, v))
+    }
 }
 
 // Frame
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Frame {
     bound: HashMap<Var, Value>,
 }
