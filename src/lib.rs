@@ -839,7 +839,7 @@ mod tests {
             ]
         };
 
-        q.print_result(&store());
+        assert_eq!(q.qeval(&store()).unwrap(), table![[100, "Moritz"]]);
     }
 
     #[test]
@@ -855,7 +855,7 @@ mod tests {
             ]
         };
 
-        q.print_result(&store());
+        assert_eq!(q.qeval(&store()).unwrap(), table![[200], [100]]);
     }
 
     #[test]
@@ -868,8 +868,7 @@ mod tests {
             ]
         };
 
-        let result = q.qeval(&STORE).unwrap();
-        assert_eq!(result, table![[1979]]);
+        assert_eq!(q.qeval(&STORE).unwrap(), table![[1979]]);
     }
 
     #[test]
@@ -881,9 +880,8 @@ mod tests {
             ]
         };
 
-        let result = q.qeval(&STORE).unwrap();
         assert_eq!(
-            result,
+            q.qeval(&STORE).unwrap(),
             table![
                 ["movie/title", "The Terminator"],
                 ["movie/year", 1984],
@@ -919,6 +917,48 @@ mod tests {
                 ["James Cameron", "Terminator 2: Judgment Day"],
                 ["Jonathan Mostow", "Terminator 3: Rise of the Machines"]
             ]
-        )
+        );
+    }
+
+    #[test]
+    fn movies_1985() {
+        let q = query! {
+            find: [?title],
+            where: [
+                [?m, :movie/title ?title]
+                [?m, :movie/year 1985]
+            ]
+        };
+
+        assert_eq!(
+            q.qeval(&STORE).unwrap(),
+            table![
+                ["Commando"],
+                ["Rambo: First Blood Part II"],
+                ["Mad Max Beyond Thunderdome"]
+            ]
+        );
+    }
+
+    #[test]
+    fn movies_attrs() {
+        let q = query! {
+            find: [?attr],
+            where: [
+                [?m, :movie/title "Commando"]
+                    [?m, ?attr ?v]
+            ]
+        };
+
+        assert_eq!(
+            q.qeval(&STORE).unwrap(),
+            table![
+                ["movie/director"],
+                ["movie/cast"],
+                ["trivia"],
+                ["movie/year"],
+                ["movie/title"]
+            ]
+        );
     }
 }
