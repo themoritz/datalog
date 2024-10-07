@@ -1,8 +1,8 @@
-use std::hint::black_box;
+use std::{collections::HashSet, hint::black_box};
 use criterion::{criterion_group, criterion_main, Criterion};
 use datalog::{movies::STORE, query, where_, Attribute, Entry, Pattern, Query, Value, Var, Where};
 
-fn run_query(name: &str) -> Vec<Vec<Value>> {
+fn run_query(name: &str) -> HashSet<Vec<Value>> {
     let q = query! {
         find: [?director, ?movie],
         where: [

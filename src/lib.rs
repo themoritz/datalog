@@ -5,7 +5,7 @@ pub mod movies;
 // Store
 
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     fmt::Display,
 };
 
@@ -31,17 +31,29 @@ impl Data for Entity {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct Attribute(pub String);
 
+impl Attribute {
+    fn min() -> Self {
+        Attribute("".to_string())
+    }
+}
+
 impl Data for Attribute {
     fn embed(self) -> Value {
         Value::Str(self.0)
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub enum Value {
-    Str(String),
-    Float(NotNan<f64>),
     Int(u64),
+    Float(NotNan<f64>),
+    Str(String),
+}
+
+impl Value {
+    fn min() -> Self {
+        Value::Int(0)
+    }
 }
 
 impl From<f64> for Value {
@@ -78,6 +90,7 @@ impl Data for Value {
     }
 }
 
+/// "DatomEAV"
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 struct Datom {
     e: Entity,
@@ -85,10 +98,64 @@ struct Datom {
     v: Value,
 }
 
+impl From<Datom> for DatomAEV {
+    fn from(value: Datom) -> Self {
+        DatomAEV {
+            a: value.a,
+            e: value.e,
+            v: value.v,
+        }
+    }
+}
+
+impl From<Datom> for DatomAVE {
+    fn from(value: Datom) -> Self {
+        DatomAVE {
+            a: value.a,
+            v: value.v,
+            e: value.e,
+        }
+    }
+}
+
+impl From<DatomAEV> for Datom {
+    fn from(value: DatomAEV) -> Self {
+        Datom {
+            e: value.e,
+            a: value.a,
+            v: value.v,
+        }
+    }
+}
+
+impl From<DatomAVE> for Datom {
+    fn from(value: DatomAVE) -> Self {
+        Datom {
+            e: value.e,
+            a: value.a,
+            v: value.v,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
+struct DatomAEV {
+    a: Attribute,
+    e: Entity,
+    v: Value,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
+struct DatomAVE {
+    a: Attribute,
+    v: Value,
+    e: Entity,
+}
+
 pub struct Store {
     eav: BTreeSet<Datom>,
-    aev: BTreeSet<Datom>,
-    ave: BTreeSet<Datom>,
+    aev: BTreeSet<DatomAEV>,
+    ave: BTreeSet<DatomAVE>,
 }
 
 impl Store {
@@ -100,6 +167,12 @@ impl Store {
         }
     }
 
+    fn insert(&mut self, datom: Datom) {
+        self.eav.insert(datom.clone());
+        self.aev.insert(datom.clone().into());
+        self.ave.insert(datom.into());
+    }
+
     fn into_iter(&self) -> impl Iterator<Item = Datom> {
         self.eav.clone().into_iter()
     }
@@ -108,10 +181,18 @@ impl Store {
         self.eav.iter()
     }
 
-    fn insert(&mut self, datom: Datom) {
-        self.eav.insert(datom.clone());
-        self.aev.insert(datom.clone());
-        self.ave.insert(datom);
+    fn iter_entity(&self, Entity(e): Entity) -> impl Iterator<Item = Datom> + '_ {
+        let min = Datom {
+            e: Entity(e),
+            a: Attribute::min(),
+            v: Value::min(),
+        };
+        let max = Datom {
+            e: Entity(e + 1),
+            a: Attribute::min(),
+            v: Value::min(),
+        };
+        self.eav.range(min..max).map(|eav| eav.clone().into())
     }
 }
 
@@ -143,7 +224,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn qeval(&self, store: &Store) -> Result<Vec<Vec<Value>>, String> {
+    pub fn qeval(&self, store: &Store) -> Result<HashSet<Vec<Value>>, String> {
         let frame_iter = self.where_.qeval(store, vec![Frame::new()].into_iter());
         frame_iter.map(|frame| frame.row(&self.find)).collect()
     }
@@ -193,18 +274,15 @@ impl Where {
         frames: impl Iterator<Item = Frame> + 'a,
     ) -> Box<dyn Iterator<Item = Frame> + 'a> {
         match self {
-            Where::Pattern(p) => Box::new(frames.flat_map(move |frame| {
-                store.iter().filter_map(move |datom| {
-                    let mut frame = frame.clone();
-                    if let Ok(()) = p.match_(&mut frame, datom) {
-                        Some(frame)
-                    } else {
-                        None
-                    }
-                })
-            })),
+            Where::Pattern(pattern) => Box::new(PatternI {
+                pattern,
+                frames,
+                current_frame: None,
+                store,
+                candidates: Candidates::Strict(Box::new(Vec::new().into_iter())),
+            }),
             Where::And(left, right) => right.qeval(store, left.qeval(store, frames)),
-            Where::Or(left, right) => Box::new(QevalOr {
+            Where::Or(left, right) => Box::new(OrI {
                 inner: frames,
                 store,
                 left,
@@ -215,7 +293,66 @@ impl Where {
     }
 }
 
-struct QevalOr<'a, I> {
+enum Candidates<'a> {
+    Lazy(Box<dyn Iterator<Item = &'a Datom> + 'a>),
+    Strict(Box<dyn Iterator<Item = Datom> + 'a>),
+}
+
+struct PatternI<'a, I> {
+    pattern: &'a Pattern,
+    frames: I,
+    current_frame: Option<Frame>,
+    store: &'a Store,
+    candidates: Candidates<'a>,
+}
+
+impl<'a, I: Iterator<Item = Frame>> PatternI<'a, I> {
+    fn match_(&mut self, mut frame: Frame, datom: &Datom) -> Option<Frame> {
+        if let Ok(()) = self.pattern.match_(&mut frame, datom) {
+            Some(frame)
+        } else {
+            self.next()
+        }
+    }
+
+    fn next_frame(&mut self) -> Option<Frame> {
+        match self.frames.next() {
+            Some(frame) => {
+                self.current_frame = Some(frame.clone());
+                if let Some(entity) = self.pattern.entity_bound(&frame) {
+                    self.candidates = Candidates::Strict(Box::new(self.store.iter_entity(entity)));
+                } else {
+                    self.candidates = Candidates::Lazy(Box::new(self.store.iter()));
+                }
+                self.next()
+            }
+            None => None,
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = Frame>> Iterator for PatternI<'a, I> {
+    type Item = Frame;
+
+    // TODO: Avoid recursion
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.current_frame {
+            Some(ref frame) => match self.candidates {
+                Candidates::Lazy(ref mut i) => match i.next() {
+                    Some(datom) => self.match_(frame.clone(), datom),
+                    None => self.next_frame(),
+                },
+                Candidates::Strict(ref mut i) => match i.next() {
+                    Some(datom) => self.match_(frame.clone(), &datom),
+                    None => self.next_frame(),
+                },
+            },
+            None => self.next_frame(),
+        }
+    }
+}
+
+struct OrI<'a, I> {
     inner: I,
     store: &'a Store,
     left: &'a Box<Where>,
@@ -223,7 +360,7 @@ struct QevalOr<'a, I> {
     queue: VecDeque<Frame>,
 }
 
-impl<'a, I: Iterator<Item = Frame>> Iterator for QevalOr<'a, I> {
+impl<'a, I: Iterator<Item = Frame>> Iterator for OrI<'a, I> {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -235,7 +372,7 @@ impl<'a, I: Iterator<Item = Frame>> Iterator for QevalOr<'a, I> {
                 let right_frames = self.right.qeval(self.store, vec![frame].into_iter());
                 self.queue.extend(left_frames);
                 self.queue.extend(right_frames);
-                self.next()
+                self.next() // TODO: Avoid recursion
             } else {
                 None
             }
@@ -297,6 +434,19 @@ impl Pattern {
         self.a.match_(frame, &datom.a)?;
         self.v.match_(frame, &datom.v)?;
         Ok(())
+    }
+
+    fn entity_bound(&self, frame: &Frame) -> Option<Entity> {
+        match self.e {
+            Entry::Lit(ref e) => Some(e.clone()),
+            Entry::Var(ref v) => {
+                let val = frame.bound.get(v)?;
+                match val {
+                    Value::Int(e) => Some(Entity(*e)),
+                    _ => None,
+                }
+            }
+        }
     }
 }
 
@@ -434,7 +584,7 @@ macro_rules! datom {
 
 macro_rules! table {
     [ $($row:tt),* ] => {
-        vec![$(row!($row),)*]
+        HashSet::from_iter(vec![$(row!($row),)*])
     };
 }
 
