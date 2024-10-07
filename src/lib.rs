@@ -391,13 +391,26 @@ macro_rules! where_ {
     }};
 }
 
+#[macro_export]
 macro_rules! datom {
     [ $e:expr, :$a:ident$(/$b:ident)* $v:expr ] => {
-        Datom {
-            e: Entity($e),
-            a: Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string()),
-            v: Value::from($v),
+        crate::Datom {
+            e: crate::Entity($e),
+            a: crate::Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string()),
+            v: crate::Value::from($v),
         }
+    };
+}
+
+macro_rules! table {
+    [ $($row:tt),* ] => {
+        vec![$(row!($row),)*]
+    };
+}
+
+macro_rules! row {
+    ([ $($e:expr),* ]) => {
+        vec![$(crate::Value::from($e),)*]
     };
 }
 
@@ -432,7 +445,7 @@ mod tests {
                                 Where::Pattern(Pattern {
                                     e: Entry::Lit(Entity(3)),
                                     a: Entry::Lit(Attribute("foo".to_string())),
-                                    v: Entry::Lit(Value::Float(3.0)),
+                                    v: Entry::Lit(Value::Int(3)),
                                 }),
                                 Where::Pattern(Pattern {
                                     e: Entry::Lit(Entity(1)),
@@ -456,7 +469,7 @@ mod tests {
                         Where::Pattern(Pattern {
                             e: Entry::Var(Var("x".to_string())),
                             a: Entry::Lit(Attribute("foo".to_string())),
-                            v: Entry::Lit(Value::Float(3.0)),
+                            v: Entry::Lit(Value::Int(3)),
                         }),
                         Where::Pattern(Pattern {
                             e: Entry::Var(Var("x".to_string())),
@@ -579,7 +592,9 @@ mod tests {
         };
 
         let result = q.qeval(&STORE).unwrap();
-        assert_eq!(result, vec![vec![Value::Int(1979)]]);
+        assert_eq!(result, table![
+            [1979]
+        ]);
     }
 
     #[test]
@@ -590,21 +605,39 @@ mod tests {
                 [200, ?attr ?value]
             ]
         };
+
+        let result = q.qeval(&STORE).unwrap();
+        assert_eq!(result, table![
+            ["movie/title", "The Terminator"],
+            ["movie/year", 1984],
+            ["movie/director", 100],
+            ["movie/cast", 101],
+            ["movie/cast", 102],
+            ["movie/cast", 103],
+            ["movie/sequel", 207]
+        ]);
     }
 
     #[test]
     fn movies_arnold() {
         let q = query! {
-            find: [?directorName, ?movieTitle],
+            find: [?director, ?movie],
             where: [
-                [?arnoldId, :person/name "Arnold Schwarzenegger"]
-                [?movieId, :movie/cast ?arnoldId]
-                [?movieId, :movie/title ?movieTitle]
-                [?movieId, :movie/director ?directorId]
-                [?directorId, :person/name ?directorName]
+                [?a, :person/name "Arnold Schwarzenegger"]
+                [?m, :movie/cast ?a]
+                [?m, :movie/title ?movie]
+                [?m, :movie/director ?d]
+                [?d, :person/name ?director]
             ]
         };
 
-        q.print_result(&STORE);
+        let result = q.qeval(&STORE).unwrap();
+        assert_eq!(result, table![
+            ["James Cameron", "The Terminator"],
+            ["John McTiernan", "Predator"],
+            ["Mark L. Lester", "Commando"],
+            ["James Cameron", "Terminator 2: Judgment Day"],
+            ["Jonathan Mostow", "Terminator 3: Rise of the Machines"]
+        ])
     }
 }

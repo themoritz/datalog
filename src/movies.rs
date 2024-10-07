@@ -1,17 +1,6 @@
 use lazy_static;
 
-use crate::{Store, Datom, Entity, Attribute, Value};
-
-// TODO: Export?
-macro_rules! datom {
-    [ $e:expr, :$a:ident$(/$b:ident)* $v:expr ] => {
-        Datom {
-            e: Entity($e),
-            a: Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string()),
-            v: Value::from($v),
-        }
-    };
-}
+use crate::{datom, Store};
 
 lazy_static::lazy_static! {
     pub(crate) static ref STORE: Store = Store { data: vec![
