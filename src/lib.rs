@@ -5,9 +5,11 @@ pub mod movies;
 // Store
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, VecDeque},
     fmt::Display,
 };
+
+use ordered_float::NotNan;
 
 pub trait Data: PartialEq + Clone {
     fn compare_to_bound(&self, bound: &Value) -> bool {
@@ -17,7 +19,7 @@ pub trait Data: PartialEq + Clone {
     fn embed(self) -> Value;
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct Entity(pub u64);
 
 impl Data for Entity {
@@ -26,7 +28,7 @@ impl Data for Entity {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct Attribute(pub String);
 
 impl Data for Attribute {
@@ -35,16 +37,16 @@ impl Data for Attribute {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub enum Value {
     Str(String),
-    Float(f64),
+    Float(NotNan<f64>),
     Int(u64),
 }
 
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
-        Self::Float(value)
+        Self::Float(NotNan::new(value).unwrap())
     }
 }
 
@@ -76,7 +78,7 @@ impl Data for Value {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 struct Datom {
     e: Entity,
     a: Attribute,
@@ -84,16 +86,42 @@ struct Datom {
 }
 
 pub struct Store {
-    data: Vec<Datom>,
+    eav: BTreeSet<Datom>,
+    aev: BTreeSet<Datom>,
+    ave: BTreeSet<Datom>,
 }
 
 impl Store {
-    fn into_iter(self) -> impl Iterator<Item = Datom> {
-        self.data.into_iter()
+    pub fn new() -> Self {
+        Store {
+            eav: BTreeSet::new(),
+            aev: BTreeSet::new(),
+            ave: BTreeSet::new(),
+        }
+    }
+
+    fn into_iter(&self) -> impl Iterator<Item = Datom> {
+        self.eav.clone().into_iter()
     }
 
     fn iter(&self) -> impl Iterator<Item = &Datom> + '_ {
-        self.data.iter()
+        self.eav.iter()
+    }
+
+    fn insert(&mut self, datom: Datom) {
+        self.eav.insert(datom.clone());
+        self.aev.insert(datom.clone());
+        self.ave.insert(datom);
+    }
+}
+
+impl FromIterator<Datom> for Store {
+    fn from_iter<T: IntoIterator<Item = Datom>>(iter: T) -> Self {
+        let mut s = Self::new();
+        for datom in iter {
+            s.insert(datom);
+        }
+        s
     }
 }
 
@@ -541,16 +569,14 @@ mod tests {
     }
 
     fn store() -> Store {
-        Store {
-            data: vec![
-                datom![100, :name "Moritz"],
-                datom![100, :age 39],
-                datom![150, :name "Moritz"],
-                datom![150, :age 30],
-                datom![200, :name "Piet"],
-                datom![200, :age 39],
-            ],
-        }
+        Store::from_iter(vec![
+            datom![100, :name "Moritz"],
+            datom![100, :age 39],
+            datom![150, :name "Moritz"],
+            datom![150, :age 30],
+            datom![200, :name "Piet"],
+            datom![200, :age 39],
+        ])
     }
 
     #[test]
@@ -594,9 +620,7 @@ mod tests {
         };
 
         let result = q.qeval(&STORE).unwrap();
-        assert_eq!(result, table![
-            [1979]
-        ]);
+        assert_eq!(result, table![[1979]]);
     }
 
     #[test]
@@ -609,15 +633,18 @@ mod tests {
         };
 
         let result = q.qeval(&STORE).unwrap();
-        assert_eq!(result, table![
-            ["movie/title", "The Terminator"],
-            ["movie/year", 1984],
-            ["movie/director", 100],
-            ["movie/cast", 101],
-            ["movie/cast", 102],
-            ["movie/cast", 103],
-            ["movie/sequel", 207]
-        ]);
+        assert_eq!(
+            result,
+            table![
+                ["movie/title", "The Terminator"],
+                ["movie/year", 1984],
+                ["movie/director", 100],
+                ["movie/cast", 101],
+                ["movie/cast", 102],
+                ["movie/cast", 103],
+                ["movie/sequel", 207]
+            ]
+        );
     }
 
     #[test]
@@ -634,12 +661,15 @@ mod tests {
         };
 
         let result = q.qeval(&STORE).unwrap();
-        assert_eq!(result, table![
-            ["James Cameron", "The Terminator"],
-            ["John McTiernan", "Predator"],
-            ["Mark L. Lester", "Commando"],
-            ["James Cameron", "Terminator 2: Judgment Day"],
-            ["Jonathan Mostow", "Terminator 3: Rise of the Machines"]
-        ])
+        assert_eq!(
+            result,
+            table![
+                ["James Cameron", "The Terminator"],
+                ["John McTiernan", "Predator"],
+                ["Mark L. Lester", "Commando"],
+                ["James Cameron", "Terminator 2: Judgment Day"],
+                ["Jonathan Mostow", "Terminator 3: Rise of the Machines"]
+            ]
+        )
     }
 }

@@ -3,7 +3,7 @@ use lazy_static;
 use crate::{datom, Store};
 
 lazy_static::lazy_static! {
-    pub static ref STORE: Store = Store { data: vec![
+    pub static ref STORE: Store = Store::from_iter(vec![
         datom![100, :person/name "James Cameron"],
         datom![100, :person/born "1954-08-16T00:00:00Z"],
         datom![101, :person/name "Arnold Schwarzenegger"],
@@ -240,5 +240,5 @@ lazy_static::lazy_static! {
         datom![219, :movie/director 112],
         datom![219, :movie/cast 112],
         datom![219, :movie/cast 149],
-    ] };
+    ]);
 }
