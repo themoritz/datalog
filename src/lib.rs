@@ -191,7 +191,7 @@ impl Store {
     pub fn new() -> Self {
         Store {
             eav: BTreeSet::new(),
-            aev: BTreeSet::new(),
+            aev: BTreeSet::new(), // TODO: In what situations do I need this?
             ave: BTreeSet::new(),
         }
     }
@@ -219,6 +219,20 @@ impl Store {
         let max = Datom {
             e: e.next(),
             a: Attribute::min(),
+            v: Value::min(),
+        };
+        self.eav.range(min..max).map(|eav| eav.clone().into())
+    }
+
+    fn iter_entity_attribute(&self, e: Entity, a: Attribute) -> impl Iterator<Item = Datom> + '_ {
+        let min = Datom {
+            e,
+            a: a.clone(),
+            v: Value::min(),
+        };
+        let max = Datom {
+            e,
+            a: a.next(),
             v: Value::min(),
         };
         self.eav.range(min..max).map(|eav| eav.clone().into())
@@ -362,7 +376,11 @@ impl<'a, I: Iterator<Item = Frame>> PatternI<'a, I> {
         match self.frames.next() {
             Some(frame) => {
                 self.current_frame = Some(frame.clone());
-                if let Some(entity) = self.pattern.entity_bound(&frame) {
+                if let Some((entity, attribute)) = self.pattern.entity_attribute_bound(&frame) {
+                    self.candidates = Candidates::Strict(Box::new(
+                        self.store.iter_entity_attribute(entity, attribute),
+                    ));
+                } else if let Some(entity) = self.pattern.entity_bound(&frame) {
                     self.candidates = Candidates::Strict(Box::new(self.store.iter_entity(entity)));
                 } else if let Some((attribute, value)) = self.pattern.attribute_value_bound(&frame)
                 {
@@ -497,8 +515,8 @@ impl Pattern {
         }
     }
 
-    fn attribute_value_bound(&self, frame: &Frame) -> Option<(Attribute, Value)> {
-        let a = match self.a {
+    fn attribute_bound(&self, frame: &Frame) -> Option<Attribute> {
+        match self.a {
             Entry::Lit(ref a) => Some(a.clone()),
             Entry::Var(ref v) => {
                 let val = frame.bound.get(v)?;
@@ -507,13 +525,25 @@ impl Pattern {
                     _ => None,
                 }
             }
-        }?;
+        }
+    }
 
-        let v = match self.v {
+    fn value_bound(&self, frame: &Frame) -> Option<Value> {
+        match self.v {
             Entry::Lit(ref v) => Some(v.clone()),
             Entry::Var(ref v) => frame.bound.get(v).cloned(),
-        }?;
+        }
+    }
 
+    fn entity_attribute_bound(&self, frame: &Frame) -> Option<(Entity, Attribute)> {
+        let e = self.entity_bound(frame)?;
+        let a = self.attribute_bound(frame)?;
+        Some((e, a))
+    }
+
+    fn attribute_value_bound(&self, frame: &Frame) -> Option<(Attribute, Value)> {
+        let a = self.attribute_bound(frame)?;
+        let v = self.value_bound(frame)?;
         Some((a, v))
     }
 }
