@@ -1,6 +1,10 @@
 use lazy_static;
 
-use crate::{datom, Cardinality, Store, Type};
+use crate::{
+    datom,
+    schema::{Cardinality, Type},
+    store::Store,
+};
 
 lazy_static::lazy_static! {
     pub static ref STORE: Store = {

@@ -1,6 +1,13 @@
 use std::{collections::HashSet, hint::black_box};
+
 use criterion::{criterion_group, criterion_main, Criterion};
-use datalog::{movies::STORE, query, where_, Attribute, Entry, Pattern, Query, Value, Var, Where};
+
+use datalog::{
+    movies::STORE,
+    query,
+    query::{Entry, Pattern, Query, Var, Where},
+    where_, Attribute, Value,
+};
 
 fn run_query(name: &str) -> HashSet<Vec<Value>> {
     let q = query! {
