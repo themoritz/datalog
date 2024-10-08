@@ -5,7 +5,9 @@ use std::fmt::Display;
 
 use ordered_float::NotNan;
 
+#[cfg(any(test, feature = "bench"))]
 pub mod movies;
+
 pub mod query;
 pub mod schema;
 pub mod store;
