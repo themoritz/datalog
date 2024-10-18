@@ -1,12 +1,14 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
+    persist::Backend,
     query::{Entry, Pattern, Where},
     Attribute, Datom, Entity, Result, Value,
 };
 
 #[derive(Clone, Debug, Copy, serde::Serialize)]
 pub enum Type {
+    Bool,
     Int,
     Ref,
     Float,
@@ -19,7 +21,7 @@ pub enum Cardinality {
     Many,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Debug)]
 struct Builtins {
     ident: Entity,
     type_: Entity,
@@ -37,6 +39,7 @@ struct Builtins {
 impl Builtins {
     fn type_entity(&self, type_: Type) -> Entity {
         match type_ {
+            Type::Bool => self.bool,
             Type::Ref => self.ref_,
             Type::Int => self.int,
             Type::Float => self.float,
@@ -52,6 +55,7 @@ impl Builtins {
     }
 }
 
+#[derive(PartialEq, Debug)]
 pub struct Store {
     eav: BTreeSet<EAV>,
     ave: BTreeSet<AVE>,
@@ -177,20 +181,23 @@ impl Store {
 
         if let Some(expected) = self.get_attribute_type(a) {
             match (expected, &datom.v) {
-                (Type::Float, Value::Float(_)) => {},
-                (Type::Int, Value::Int(_)) => {},
-                (Type::Ref, Value::Int(_)) => {},
-                (Type::Str, Value::Str(_)) => {},
-                _ => return Err(format!(
-                    "Invalid type for attribute `{}`: Expected {:?}, got {:?}",
-                    datom.a.0, expected, datom.v
-                )),
+                (Type::Bool, Value::Bool(_)) => {}
+                (Type::Float, Value::Float(_)) => {}
+                (Type::Int, Value::Int(_)) => {}
+                (Type::Ref, Value::Int(_)) => {}
+                (Type::Str, Value::Str(_)) => {}
+                _ => {
+                    return Err(format!(
+                        "Invalid type for attribute `{}`: Expected {:?}, got {:?}",
+                        datom.a.0, expected, datom.v
+                    ))
+                }
             }
         } else {
             return Err(format!(
                 "Could not determine required type for attribute `{}`. DB corrupt?",
                 datom.a.0
-            ))
+            ));
         }
 
         self.insert_raw(datom.e, a, datom.v);
@@ -244,10 +251,14 @@ impl Store {
         self.ave.range(min..max).map(|ave| ave.clone().into())
     }
 
-    fn get_attribute_id(&self, a: Attribute) -> Option<Entity> {
-        self.iter_attribute_value(self.builtins.ident, Value::Str(a.0))
+    fn get_entity_by_ident(&self, ident: &str) -> Option<Entity> {
+        self.iter_attribute_value(self.builtins.ident, Value::Str(ident.to_string()))
             .next()
             .map(|eav| eav.e)
+    }
+
+    fn get_attribute_id(&self, a: Attribute) -> Option<Entity> {
+        self.get_entity_by_ident(&a.0)
     }
 
     fn get_attribute(&self, e: Entity) -> Option<Attribute> {
@@ -263,7 +274,7 @@ impl Store {
         self.iter_entity_attribute(e, self.builtins.type_)
             .next()
             .and_then(|eav| match eav.v {
-                Value::Int(i) => {
+                Value::Ref(i) => {
                     if i == self.builtins.float.0 {
                         Some(Type::Float)
                     } else if i == self.builtins.int.0 {
@@ -272,11 +283,13 @@ impl Store {
                         Some(Type::Str)
                     } else if i == self.builtins.ref_.0 {
                         Some(Type::Ref)
+                    } else if i == self.builtins.bool.0 {
+                        Some(Type::Bool)
                     } else {
                         None
                     }
-                },
-                _ => None
+                }
+                _ => None,
             })
     }
 
@@ -328,19 +341,63 @@ impl Store {
             .collect()
     }
 
-    pub fn store_json(&self) -> serde_json::Value {
-        let mut entries = vec![];
+    pub fn save<B: Backend>(&self, mut backend: B) -> Result<B> {
+        backend.save(self.iter())
+    }
 
-        for eav in self.eav.iter() {
-            let v = match eav.v {
-                Value::Int(i) => serde_json::json!(i),
-                Value::Float(f) => serde_json::json!(f),
-                Value::Str(ref s) => serde_json::json!(s),
-            };
-            entries.push(serde_json::json!([eav.e.0, eav.a.0, v]));
+    pub fn load<B: Backend>(mut backend: B) -> Result<Self> {
+        let mut s = Store {
+            eav: BTreeSet::new(),
+            ave: BTreeSet::new(),
+            builtins: Builtins::default(),
+            next_id: 0,
+            next_tx: 1,
+        };
+
+        let mut ident = Entity(0);
+        for eav in backend.load()? {
+            if eav.e == eav.a && eav.v == Value::Str("db/ident".to_string()) {
+                ident = eav.e;
+            }
+            s.insert_raw(eav.e, eav.a, eav.v);
         }
 
-        serde_json::Value::Array(entries)
+        // Need this to recover builtin entities
+        s.builtins.ident = ident;
+
+        if let Some(last) = s.eav.last() {
+            s.next_id = last.e.0 + 1;
+        }
+
+        macro_rules! recover_builtin {
+            ($ident:literal) => {
+                match s.get_entity_by_ident($ident) {
+                    Some(e) => e,
+                    None => {
+                        return Err(format!(
+                            "Could not find built-in entity `{}`. DB corrupt?",
+                            $ident
+                        ))
+                    }
+                }
+            };
+        }
+
+        s.builtins = Builtins {
+            ident,
+            type_: recover_builtin!("db/type"),
+            card: recover_builtin!("db/cardinality"),
+            doc: recover_builtin!("db/doc"),
+            one: recover_builtin!("db.cardinality/one"),
+            many: recover_builtin!("db.cardinality/many"),
+            ref_: recover_builtin!("db.type/ref"),
+            string: recover_builtin!("db.type/string"),
+            int: recover_builtin!("db.type/int"),
+            float: recover_builtin!("db.type/float"),
+            bool: recover_builtin!("db.type/bool"),
+        };
+
+        Ok(s)
     }
 }
 
@@ -370,14 +427,15 @@ impl From<AVE> for EAV {
 
 #[cfg(test)]
 mod tests {
-    use crate::{datom, movies::DATA};
+    use crate::{datom, movies::DATA, persist};
 
     use super::{Cardinality, Store, Type};
 
     #[test]
     fn insert_type_check() {
         let mut s = Store::new();
-        s.add_attribute("foo", Type::Int, Cardinality::One, "").unwrap();
+        s.add_attribute("foo", Type::Int, Cardinality::One, "")
+            .unwrap();
 
         s.insert(datom!(100, :foo 4)).unwrap();
 
@@ -386,45 +444,45 @@ mod tests {
 
     #[test]
     fn persist_json() {
-        let actual = DATA.store_json();
+        let actual = DATA.save(persist::Json::new()).unwrap().extract();
         let expected = serde_json::json!([
-            [0, 0, "db/ident"],
-            [0, 1, 7],
-            [0, 2, 4],
-            [0, 3, "The identifier of an attribute"],
-            [1, 0, "db/type"],
-            [1, 1, 6],
-            [1, 2, 4],
-            [1, 3, "Type of an attribute"],
-            [2, 0, "db/cardinality"],
-            [2, 1, 6],
-            [2, 2, 4],
-            [2, 3, "Cardinality of an attribute"],
-            [3, 0, "db/doc"],
-            [3, 1, 7],
-            [3, 2, 4],
-            [3, 3, "Documentation string for an attribute"],
-            [4, 0, "db.cardinality/one"],
-            [5, 0, "db.cardinality/many"],
-            [6, 0, "db.type/ref"],
-            [7, 0, "db.type/string"],
-            [8, 0, "db.type/int"],
-            [9, 0, "db.type/float"],
-            [10, 0, "db.type/bool"],
-            [11, 0, "name"],
-            [11, 1, 7],
-            [11, 2, 4],
-            [11, 3, "The name"],
-            [12, 0, "age"],
-            [12, 1, 8],
-            [12, 2, 4],
-            [12, 3, ""],
-            [100, 11, "Moritz"],
-            [100, 12, 39],
-            [150, 11, "Moritz"],
-            [150, 12, 30],
-            [200, 11, "Piet"],
-            [200, 12, 39],
+            [0, 0, { "str": "db/ident" }],
+            [0, 1, { "ref": 7 }],
+            [0, 2, { "ref": 4 }],
+            [0, 3, { "str": "The identifier of an attribute" }],
+            [1, 0, { "str": "db/type" }],
+            [1, 1, { "ref": 6 }],
+            [1, 2, { "ref": 4 }],
+            [1, 3, { "str": "Type of an attribute" }],
+            [2, 0, { "str": "db/cardinality" }],
+            [2, 1, { "ref": 6 }],
+            [2, 2, { "ref": 4 }],
+            [2, 3, { "str": "Cardinality of an attribute" }],
+            [3, 0, { "str": "db/doc" }],
+            [3, 1, { "ref": 7 }],
+            [3, 2, { "ref": 4 }],
+            [3, 3, { "str": "Documentation string for an attribute" }],
+            [4, 0, { "str": "db.cardinality/one" }],
+            [5, 0, { "str": "db.cardinality/many" }],
+            [6, 0, { "str": "db.type/ref" }],
+            [7, 0, { "str": "db.type/string" }],
+            [8, 0, { "str": "db.type/int" }],
+            [9, 0, { "str": "db.type/float" }],
+            [10, 0, { "str": "db.type/bool" }],
+            [11, 0, { "str": "name" }],
+            [11, 1, { "ref": 7 }],
+            [11, 2, { "ref": 4 }],
+            [11, 3, { "str": "The name" }],
+            [12, 0, { "str": "age" }],
+            [12, 1, { "ref": 8 }],
+            [12, 2, { "ref": 4 }],
+            [12, 3, { "str": "" }],
+            [100, 11, { "str": "Moritz" }],
+            [100, 12, { "int": 39 }],
+            [150, 11, { "str": "Moritz" }],
+            [150, 12, { "int": 30 }],
+            [200, 11, { "str": "Piet" }],
+            [200, 12, { "int": 39 }],
         ]);
         assert_eq!(actual, expected);
     }

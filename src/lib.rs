@@ -4,10 +4,12 @@
 use std::fmt::Display;
 
 use ordered_float::NotNan;
+use serde::Serialize;
 
 #[cfg(any(test, feature = "bench"))]
 pub mod movies;
 
+pub mod persist;
 pub mod query;
 pub mod store;
 
@@ -36,7 +38,7 @@ impl Entity {
 
 impl Data for Entity {
     fn embed(self) -> Value {
-        Value::Int(self.0)
+        Value::Int(self.0) // TODO: This should be Ref
     }
 }
 
@@ -49,9 +51,12 @@ impl Data for Attribute {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Value {
+    Bool(bool),
     Int(u64),
+    Ref(u64),
     Float(NotNan<f64>),
     Str(String),
 }
@@ -61,9 +66,18 @@ impl Value {
         Value::Int(0)
     }
 
+    // TODO: Make this safer to handle overflows
     fn next(&self) -> Self {
         match self {
+            Self::Bool(b) => {
+                if *b {
+                    Self::Int(0)
+                } else {
+                    Self::Bool(true)
+                }
+            }
             Self::Int(i) => Self::Int(i + 1),
+            Self::Ref(i) => Self::Ref(i + 1),
             Self::Float(f) => Self::Float(NotNan::new(f.to_owned().next_up()).unwrap()),
             Self::Str(s) => {
                 let mut s2 = s.clone();
@@ -94,7 +108,7 @@ impl From<&str> for Value {
 
 impl From<Entity> for Value {
     fn from(value: Entity) -> Self {
-        Self::Int(value.0)
+        Self::Ref(value.0)
     }
 }
 
@@ -102,8 +116,10 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Str(s) => s.fmt(f),
+            Value::Ref(i) => i.fmt(f),
             Value::Float(x) => x.fmt(f),
             Value::Int(x) => x.fmt(f),
+            Value::Bool(b) => b.fmt(f),
         }
     }
 }
