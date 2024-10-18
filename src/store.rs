@@ -20,7 +20,7 @@ impl Store {
             schema: Schema::new(),
             eav: BTreeSet::new(),
             ave: BTreeSet::new(),
-            next_id: 1,
+            next_id: 10,
             next_tx: 1,
         }
     }
@@ -36,15 +36,14 @@ impl Store {
             return Err("Attribute already defined".to_string());
         }
 
-        self.schema.ids.insert(a.clone(), Entity(self.next_id));
         self.schema
             .attributes
             .insert(Entity(self.next_id), a.clone());
-        self.next_id += 1;
 
-        let details = schema::AttributeDetails { type_, cardinality };
+        let details = schema::AttributeDetails { type_, cardinality, id: Entity(self.next_id) };
         self.schema.details.insert(a, details);
 
+        self.next_id += 1;
         Ok(())
     }
 
@@ -168,6 +167,46 @@ impl Store {
             })
             .collect()
     }
+
+    pub fn store_json(&self) -> serde_json::Value {
+        let mut entries = vec![];
+
+        let mut attributes: Vec<_> = self.schema.details.iter().collect();
+        attributes.sort_by_key(|(_, d)| d.id);
+
+        for (a, details) in attributes {
+            entries.push(serde_json::json!([
+                details.id.0,
+                1,
+                a.0
+            ]));
+            entries.push(serde_json::json!([
+                details.id.0,
+                2,
+                details.type_
+            ]));
+            entries.push(serde_json::json!([
+                details.id.0,
+                3,
+                details.cardinality
+            ]));
+        }
+
+        for eav in self.eav.iter() {
+            let v = match eav.v {
+                Value::Int(i) => serde_json::json!(i),
+                Value::Float(f) => serde_json::json!(f),
+                Value::Str(ref s) => serde_json::json!(s),
+            };
+            entries.push(serde_json::json!([
+                eav.e.0,
+                eav.a.0,
+                v
+            ]));
+        }
+
+        serde_json::Value::Array(entries)
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
@@ -191,5 +230,34 @@ impl From<AVE> for EAV {
             a: value.a,
             v: value.v,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::movies::DATA;
+
+    #[test]
+    fn persist_json() {
+        let actual = DATA.store_json();
+        let expected = serde_json::json!([
+            [10, 1, "name"],
+            [10, 2, "Str"],
+            [10, 3, "One"],
+
+            [11, 1, "age"],
+            [11, 2, "Int"],
+            [11, 3, "One"],
+
+            [100, 10, "Moritz"],
+            [100, 11, 39],
+
+            [150, 10, "Moritz"],
+            [150, 11, 30],
+
+            [200, 10, "Piet"],
+            [200, 11, 39],
+        ]);
+        assert_eq!(actual, expected);
     }
 }

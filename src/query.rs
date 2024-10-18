@@ -427,7 +427,7 @@ macro_rules! where_ {
 mod tests {
     use super::*;
 
-    use crate::{datom, movies::STORE, row, schema, table};
+    use crate::{datom, movies::STORE, movies::DATA, row, table};
 
     #[test]
     fn macro_query() {
@@ -534,32 +534,6 @@ mod tests {
             .is_err());
     }
 
-    fn store() -> Store {
-        let mut store = Store::new();
-
-        store
-            .add_attribute("name", schema::Type::Str, schema::Cardinality::One)
-            .unwrap();
-        store
-            .add_attribute("age", schema::Type::Int, schema::Cardinality::One)
-            .unwrap();
-
-        let datoms = vec![
-            datom![100, :name "Moritz"],
-            datom![100, :age 39],
-            datom![150, :name "Moritz"],
-            datom![150, :age 30],
-            datom![200, :name "Piet"],
-            datom![200, :age 39],
-        ];
-
-        for datom in datoms {
-            store.insert(datom).unwrap();
-        }
-
-        store
-    }
-
     #[test]
     fn qeval_pattern() {
         let q = query! {
@@ -571,7 +545,7 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&store()).unwrap(), table![[100, "Moritz"]]);
+        assert_eq!(q.qeval(&DATA).unwrap(), table![[100, "Moritz"]]);
     }
 
     #[test]
@@ -587,7 +561,7 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&store()).unwrap(), table![[200], [100]]);
+        assert_eq!(q.qeval(&DATA).unwrap(), table![[200], [100]]);
     }
 
     #[test]

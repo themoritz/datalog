@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{Attribute, Entity, Value};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize)]
 pub enum Type {
     Int,
     Ref,
@@ -10,6 +10,7 @@ pub enum Type {
     Str,
 }
 
+#[derive(serde::Serialize)]
 pub enum Cardinality {
     One,
     Many,
@@ -18,11 +19,11 @@ pub enum Cardinality {
 pub struct AttributeDetails {
     pub type_: Type,
     pub cardinality: Cardinality,
+    pub id: Entity,
 }
 
 pub struct Schema {
     pub details: HashMap<Attribute, AttributeDetails>,
-    pub ids: HashMap<Attribute, Entity>,
     pub attributes: HashMap<Entity, Attribute>,
 }
 
@@ -30,13 +31,12 @@ impl Schema {
     pub fn new() -> Self {
         Schema {
             details: HashMap::new(),
-            ids: HashMap::new(),
             attributes: HashMap::new(),
         }
     }
 
     pub fn get_id(&self, a: &Attribute) -> Option<Entity> {
-        self.ids.get(a).copied()
+        self.details.get(a).map(|d| d.id)
     }
 
     pub fn valid_type(&self, a: &Attribute, v: &Value) -> bool {

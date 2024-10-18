@@ -4,9 +4,36 @@ use crate::{
     datom,
     schema::{Cardinality, Type},
     store::Store,
+    schema,
 };
 
 lazy_static::lazy_static! {
+    pub static ref DATA: Store = {
+        let mut store = Store::new();
+
+        store
+            .add_attribute("name", schema::Type::Str, schema::Cardinality::One)
+            .unwrap();
+        store
+            .add_attribute("age", schema::Type::Int, schema::Cardinality::One)
+            .unwrap();
+
+        let datoms = vec![
+            datom![100, :name "Moritz"],
+            datom![100, :age 39],
+            datom![150, :name "Moritz"],
+            datom![150, :age 30],
+            datom![200, :name "Piet"],
+            datom![200, :age 39],
+        ];
+
+        for datom in datoms {
+            store.insert(datom).unwrap();
+        }
+
+        store
+    };
+
     pub static ref STORE: Store = {
         let datoms = vec![
             datom![100, :person/name "James Cameron"],
