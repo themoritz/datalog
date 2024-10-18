@@ -5,7 +5,7 @@ use crate::{
     Attribute, Datom, Entity, Result, Value,
 };
 
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(Clone, Debug, Copy, serde::Serialize)]
 pub enum Type {
     Int,
     Ref,
@@ -175,13 +175,23 @@ impl Store {
             None => Err(format!("Could not find id for attribute `{}`", datom.a.0)),
         }?;
 
-        // TODO: Validate type
-        // if !self.schema.valid_type(&datom.a, &datom.v) {
-        //     return Err(format!(
-        //         "Invalid type for attribute `{}`: {:?}",
-        //         datom.a.0, datom.v
-        //     ));
-        // }
+        if let Some(expected) = self.get_attribute_type(a) {
+            match (expected, &datom.v) {
+                (Type::Float, Value::Float(_)) => {},
+                (Type::Int, Value::Int(_)) => {},
+                (Type::Ref, Value::Int(_)) => {},
+                (Type::Str, Value::Str(_)) => {},
+                _ => return Err(format!(
+                    "Invalid type for attribute `{}`: Expected {:?}, got {:?}",
+                    datom.a.0, expected, datom.v
+                )),
+            }
+        } else {
+            return Err(format!(
+                "Could not determine required type for attribute `{}`. DB corrupt?",
+                datom.a.0
+            ))
+        }
 
         self.insert_raw(datom.e, a, datom.v);
 
@@ -246,6 +256,27 @@ impl Store {
             .and_then(|eav| match eav.v {
                 Value::Str(a) => Some(Attribute(a)),
                 _ => None,
+            })
+    }
+
+    fn get_attribute_type(&self, e: Entity) -> Option<Type> {
+        self.iter_entity_attribute(e, self.builtins.type_)
+            .next()
+            .and_then(|eav| match eav.v {
+                Value::Int(i) => {
+                    if i == self.builtins.float.0 {
+                        Some(Type::Float)
+                    } else if i == self.builtins.int.0 {
+                        Some(Type::Int)
+                    } else if i == self.builtins.string.0 {
+                        Some(Type::Str)
+                    } else if i == self.builtins.ref_.0 {
+                        Some(Type::Ref)
+                    } else {
+                        None
+                    }
+                },
+                _ => None
             })
     }
 
@@ -339,7 +370,19 @@ impl From<AVE> for EAV {
 
 #[cfg(test)]
 mod tests {
-    use crate::movies::DATA;
+    use crate::{datom, movies::DATA};
+
+    use super::{Cardinality, Store, Type};
+
+    #[test]
+    fn insert_type_check() {
+        let mut s = Store::new();
+        s.add_attribute("foo", Type::Int, Cardinality::One, "").unwrap();
+
+        s.insert(datom!(100, :foo 4)).unwrap();
+
+        assert!(s.insert(datom!(200, :foo "Bar")).is_err());
+    }
 
     #[test]
     fn persist_json() {
