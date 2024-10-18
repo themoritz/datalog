@@ -2,9 +2,7 @@ use lazy_static;
 
 use crate::{
     datom,
-    schema::{Cardinality, Type},
-    store::Store,
-    schema,
+    store::{Cardinality, Store, Type},
 };
 
 lazy_static::lazy_static! {
@@ -12,10 +10,10 @@ lazy_static::lazy_static! {
         let mut store = Store::new();
 
         store
-            .add_attribute("name", schema::Type::Str, schema::Cardinality::One)
+            .add_attribute("name", Type::Str, Cardinality::One, "The name")
             .unwrap();
         store
-            .add_attribute("age", schema::Type::Int, schema::Cardinality::One)
+            .add_attribute("age", Type::Int, Cardinality::One, "")
             .unwrap();
 
         let datoms = vec![
@@ -276,15 +274,15 @@ lazy_static::lazy_static! {
 
         let mut store = Store::new();
 
-        store.add_attribute("person/name", Type::Str, Cardinality::One).unwrap();
-        store.add_attribute("person/born", Type::Str, Cardinality::One).unwrap();
-        store.add_attribute("person/death", Type::Str, Cardinality::One).unwrap();
-        store.add_attribute("movie/title", Type::Str, Cardinality::One).unwrap();
-        store.add_attribute("movie/year", Type::Int, Cardinality::One).unwrap();
-        store.add_attribute("movie/director", Type::Ref, Cardinality::Many).unwrap();
-        store.add_attribute("movie/cast", Type::Ref, Cardinality::Many).unwrap();
-        store.add_attribute("movie/sequel", Type::Ref, Cardinality::One).unwrap();
-        store.add_attribute("trivia", Type::Str, Cardinality::One).unwrap();
+        store.add_attribute("person/name", Type::Str, Cardinality::One, "").unwrap();
+        store.add_attribute("person/born", Type::Str, Cardinality::One, "").unwrap();
+        store.add_attribute("person/death", Type::Str, Cardinality::One, "").unwrap();
+        store.add_attribute("movie/title", Type::Str, Cardinality::One, "").unwrap();
+        store.add_attribute("movie/year", Type::Int, Cardinality::One, "").unwrap();
+        store.add_attribute("movie/director", Type::Ref, Cardinality::Many, "").unwrap();
+        store.add_attribute("movie/cast", Type::Ref, Cardinality::Many, "").unwrap();
+        store.add_attribute("movie/sequel", Type::Ref, Cardinality::One, "").unwrap();
+        store.add_attribute("trivia", Type::Str, Cardinality::One, "").unwrap();
 
         for datom in datoms {
             store.insert(datom).unwrap();

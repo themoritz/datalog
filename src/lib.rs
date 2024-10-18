@@ -9,7 +9,6 @@ use ordered_float::NotNan;
 pub mod movies;
 
 pub mod query;
-pub mod schema;
 pub mod store;
 
 type Result<T> = core::result::Result<T, String>;
@@ -22,7 +21,7 @@ pub trait Data: PartialEq + Clone {
     fn embed(self) -> Value;
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug, Default)]
 pub struct Entity(pub u64);
 
 impl Entity {
@@ -90,6 +89,12 @@ impl From<u64> for Value {
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Self::Str(value.to_string())
+    }
+}
+
+impl From<Entity> for Value {
+    fn from(value: Entity) -> Self {
+        Self::Int(value.0)
     }
 }
 

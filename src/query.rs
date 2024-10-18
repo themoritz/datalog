@@ -427,7 +427,7 @@ macro_rules! where_ {
 mod tests {
     use super::*;
 
-    use crate::{datom, movies::STORE, movies::DATA, row, table};
+    use crate::{datom, movies::DATA, movies::STORE, row, table};
 
     #[test]
     fn macro_query() {
@@ -562,6 +562,28 @@ mod tests {
         };
 
         assert_eq!(q.qeval(&DATA).unwrap(), table![[200], [100]]);
+    }
+
+    #[test]
+    fn qeval_builtins() {
+        let q = query! {
+            find: [?doc],
+            where: [
+                [?e, :db/ident "name"]
+                [?e, :db/doc ?doc]
+            ]
+        };
+
+        assert_eq!(q.qeval(&DATA).unwrap(), table![["The name"]]);
+
+        let q = query! {
+            find: [?e],
+            where: [
+                [?e, :db/ident "db/ident"]
+            ]
+        };
+
+        assert_eq!(q.qeval(&DATA).unwrap(), table![[0]]);
     }
 
     #[test]
