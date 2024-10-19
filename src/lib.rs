@@ -38,7 +38,7 @@ impl Entity {
 
 impl Data for Entity {
     fn embed(self) -> Value {
-        Value::Int(self.0) // TODO: This should be Ref
+        Value::Ref(self.0)
     }
 }
 
@@ -127,6 +127,14 @@ impl Display for Value {
 impl Data for Value {
     fn embed(self) -> Value {
         self
+    }
+}
+
+struct Ref(u64);
+
+impl From<Ref> for Value {
+    fn from(value: Ref) -> Self {
+        Value::Ref(value.0)
     }
 }
 

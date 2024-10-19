@@ -2,7 +2,7 @@
 
 - [x] And/or queries
 - [x] Indices
-- [ ] Persistence
+- [x] Persistence
 - [ ] Rules
 - [ ] Pull API (and convert into Rust types)
 - [ ] Cache queries

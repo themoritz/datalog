@@ -185,7 +185,7 @@ impl Store {
                 (Type::Bool, Value::Bool(_)) => {}
                 (Type::Float, Value::Float(_)) => {}
                 (Type::Int, Value::Int(_)) => {}
-                (Type::Ref, Value::Int(_)) => {}
+                (Type::Ref, Value::Ref(_)) => {}
                 (Type::Str, Value::Str(_)) => {}
                 _ => {
                     return Err(format!(
@@ -327,7 +327,7 @@ impl Store {
             .map(|row| {
                 row.into_iter()
                     .map(|val| {
-                        if let Value::Int(i) = val {
+                        if let Value::Ref(i) = val {
                             if let Some(Attribute(a)) = self.get_attribute(Entity(i)) {
                                 Value::Str(a.clone())
                             } else {

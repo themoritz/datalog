@@ -429,7 +429,7 @@ mod tests {
 
     use super::*;
 
-    use crate::{datom, movies::DATA, movies::STORE, row, table};
+    use crate::{datom, movies::DATA, movies::STORE, Ref, row, table};
 
     #[test]
     fn macro_query() {
@@ -525,7 +525,7 @@ mod tests {
             .match_(&mut frame, &datom![100, :name "Moritz"])
             .unwrap();
         let row = frame.row(&[Var("a".to_string())]).unwrap();
-        assert_eq!(row, vec![Value::Int(100)]);
+        assert_eq!(row, vec![Value::Ref(100)]);
 
         assert!(pattern.match_(&mut frame, &datom![100, :name 1]).is_err());
         assert!(pattern
@@ -547,7 +547,7 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![[100, "Moritz"]]);
+        assert_eq!(q.qeval(&DATA).unwrap(), table![[Ref(100), "Moritz"]]);
     }
 
     #[test]
@@ -563,7 +563,7 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![[200], [100]]);
+        assert_eq!(q.qeval(&DATA).unwrap(), table![[Ref(200)], [Ref(100)]]);
     }
 
     #[test]
@@ -585,7 +585,7 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![[0]]);
+        assert_eq!(q.qeval(&DATA).unwrap(), table![[Ref(0)]]);
     }
 
     #[test]
@@ -615,11 +615,11 @@ mod tests {
             table![
                 ["movie/title", "The Terminator"],
                 ["movie/year", 1984],
-                ["movie/director", 100],
-                ["movie/cast", 101],
-                ["movie/cast", 102],
-                ["movie/cast", 103],
-                ["movie/sequel", 207]
+                ["movie/director", Ref(100)],
+                ["movie/cast", Ref(101)],
+                ["movie/cast", Ref(102)],
+                ["movie/cast", Ref(103)],
+                ["movie/sequel", Ref(207)]
             ]
         );
     }
