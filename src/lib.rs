@@ -4,7 +4,7 @@
 use std::fmt::Display;
 
 use ordered_float::NotNan;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "bench"))]
 pub mod movies;
@@ -51,7 +51,7 @@ impl Data for Attribute {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug, Serialize)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
     Bool(bool),
@@ -166,6 +166,8 @@ macro_rules! row {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]
