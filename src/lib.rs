@@ -4,7 +4,8 @@
 use std::fmt::Display;
 
 use ordered_float::NotNan;
-use serde::{Deserialize, Serialize};
+use pull::PullError;
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 
 #[cfg(any(test, feature = "bench"))]
 pub mod movies;
@@ -55,6 +56,23 @@ impl Data for Attribute {
 impl Display for Attribute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+// Assuming Attribute can be deserialized from a string
+impl<'de> Deserializer<'de> for &'de Attribute {
+    type Error = PullError;
+
+    fn deserialize_any<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_str(&self.0)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option unit
+        unit_struct newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
     }
 }
 
