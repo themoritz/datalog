@@ -5,7 +5,10 @@ use serde::{
     forward_to_deserialize_any, Deserializer,
 };
 
-use crate::{store::Store, Attribute, Entity, Result, Value};
+use crate::{
+    store::{Cardinality, Store},
+    Attribute, Entity, Result, Value,
+};
 
 enum Api {
     Return,
@@ -39,16 +42,26 @@ impl Api {
                             .map(|eav| eav.v)
                             .collect();
 
-                        // TODO: Need to look at cardinality
-                        let value = match values.len() {
-                            0 => PullValue::Missing,
-                            1 => sub.pull(&values[0], store)?,
-                            _ => PullValue::List(
+                        let value = match store.get_attribute_cardinality(a_e) {
+                            Some(Cardinality::One) => {
+                                if let Some(v) = values.first() {
+                                    sub.pull(&v, store)?
+                                } else {
+                                    PullValue::Missing
+                                }
+                            }
+                            Some(Cardinality::Many) => PullValue::List(
                                 values
                                     .into_iter()
                                     .map(|v| sub.pull(&v, store))
                                     .collect::<Result<Vec<_>>>()?,
                             ),
+                            None => {
+                                return Err(format!(
+                                "Could not determine cardinality of attribute `{}`. DB corrupt?",
+                                a
+                            ))
+                            }
                         };
 
                         let mut record = HashMap::new();
@@ -71,17 +84,14 @@ impl Api {
                         .map(|eav| eav.e)
                         .collect();
 
-                    // TODO: Look at cardinality!
-                    let value = match values.len() {
-                        0 => PullValue::Missing,
-                        1 => sub.pull(&Value::Ref(values[0].0), store)?,
-                        _ => PullValue::List(
-                            values
-                                .into_iter()
-                                .map(|v| sub.pull(&Value::Ref(v.0), store))
-                                .collect::<Result<Vec<_>>>()?,
-                        ),
-                    };
+                    // Always a list since we're hopping back, so many entities
+                    // will have an attribute.
+                    let value = PullValue::List(
+                        values
+                            .into_iter()
+                            .map(|v| sub.pull(&Value::Ref(v.0), store))
+                            .collect::<Result<Vec<_>>>()?,
+                    );
 
                     let mut record = HashMap::new();
                     record.insert(a.clone(), value);
@@ -279,22 +289,55 @@ mod tests {
 
         let expected = MovieWithCast {
             title: "Predator".to_string(),
-            cast: vec![],
+            cast: vec![
+                Actor {
+                    name: "Arnold Schwarzenegger".to_string(),
+                    movies: vec![
+                        Movie {
+                            title: "The Terminator".to_string(),
+                        },
+                        Movie {
+                            title: "Predator".to_string(),
+                        },
+                        Movie {
+                            title: "Commando".to_string(),
+                        },
+                        Movie {
+                            title: "Terminator 2: Judgment Day".to_string(),
+                        },
+                        Movie {
+                            title: "Terminator 3: Rise of the Machines".to_string(),
+                        },
+                    ],
+                },
+                Actor {
+                    name: "Elpidia Carrillo".to_string(),
+                    movies: vec![Movie {
+                        title: "Predator".to_string(),
+                    }],
+                },
+                Actor {
+                    name: "Carl Weathers".to_string(),
+                    movies: vec![Movie {
+                        title: "Predator".to_string(),
+                    }],
+                },
+            ],
         };
 
-        let result = api.pull(&Value::Ref(202), &STORE).unwrap();
-        let deserialized: MovieWithCast = Deserialize::deserialize(&result).unwrap();
-        assert_eq!(deserialized, expected);
+        let pull_value = api.pull(&Value::Ref(202), &STORE).unwrap();
+        let actual: MovieWithCast = Deserialize::deserialize(&pull_value).unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn deserialize_list() {
-        let pv = PullValue::List(vec![
+        let pull_value = PullValue::List(vec![
             PullValue::Lit(Value::Int(5)),
             PullValue::Lit(Value::Ref(1)),
         ]);
-        let result: Vec<u64> = Deserialize::deserialize(&pv).unwrap();
-        assert_eq!(result, vec![5, 1]);
+        let actual: Vec<u64> = Deserialize::deserialize(&pull_value).unwrap();
+        assert_eq!(actual, vec![5, 1]);
     }
 
     #[test]
@@ -305,7 +348,7 @@ mod tests {
             y: String,
         }
 
-        let pv = PullValue::Record(
+        let pull_value = PullValue::Record(
             vec![
                 (Attribute("x".to_string()), PullValue::Lit(Value::Ref(10))),
                 (
@@ -317,13 +360,15 @@ mod tests {
             .collect(),
         );
 
-        let result: Test = Deserialize::deserialize(&pv).unwrap();
+        let actual: Test = Deserialize::deserialize(&pull_value).unwrap();
         assert_eq!(
-            result,
+            actual,
             Test {
                 x: 10,
                 y: "foo".to_string()
             }
         );
     }
+
+    // TODO: Test Option and Missing
 }

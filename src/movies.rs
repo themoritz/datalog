@@ -1,9 +1,9 @@
 use lazy_static;
 
 use crate::{
-    Ref,
     datom,
     store::{Cardinality, Store, Type},
+    Ref,
 };
 
 lazy_static::lazy_static! {

@@ -294,6 +294,23 @@ impl Store {
             })
     }
 
+    pub fn get_attribute_cardinality(&self, e: Entity) -> Option<Cardinality> {
+        self.iter_entity_attribute(e, self.builtins.card)
+            .next()
+            .and_then(|eav| match eav.v {
+                Value::Ref(i) => {
+                    if i == self.builtins.one.0 {
+                        Some(Cardinality::One)
+                    } else if i == self.builtins.many.0 {
+                        Some(Cardinality::Many)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+    }
+
     fn resolve_pattern(&self, p: &Pattern<Attribute>) -> Result<Pattern<Entity>> {
         let a = match &p.a {
             Entry::Var(v) => Ok(Entry::Var(v.clone())),

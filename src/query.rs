@@ -429,7 +429,7 @@ mod tests {
 
     use super::*;
 
-    use crate::{datom, movies::DATA, movies::STORE, Ref, row, table};
+    use crate::{datom, movies::DATA, movies::STORE, row, table, Ref};
 
     #[test]
     fn macro_query() {
