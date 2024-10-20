@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod movies;
 
 pub mod persist;
+pub mod pull;
 pub mod query;
 pub mod store;
 
@@ -48,6 +49,12 @@ pub struct Attribute(pub String);
 impl Data for Attribute {
     fn embed(self) -> Value {
         Value::Str(self.0)
+    }
+}
+
+impl Display for Attribute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 

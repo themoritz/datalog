@@ -146,7 +146,7 @@ impl Store {
         cardinality: Cardinality,
         doc: &str,
     ) -> Result<()> {
-        if let Some(_) = self.get_attribute_id(Attribute(name.to_string())) {
+        if let Some(_) = self.get_attribute_id(&Attribute(name.to_string())) {
             return Err("Attribute already defined".to_string());
         }
 
@@ -175,7 +175,7 @@ impl Store {
     }
 
     pub fn insert(&mut self, datom: Datom) -> Result<()> {
-        let a = match self.get_attribute_id(datom.a.clone()) {
+        let a = match self.get_attribute_id(&datom.a) {
             Some(id) => Ok(id),
             None => Err(format!("Could not find id for attribute `{}`", datom.a.0)),
         }?;
@@ -258,7 +258,7 @@ impl Store {
             .map(|eav| eav.e)
     }
 
-    fn get_attribute_id(&self, a: Attribute) -> Option<Entity> {
+    pub fn get_attribute_id(&self, a: &Attribute) -> Option<Entity> {
         self.get_entity_by_ident(&a.0)
     }
 
@@ -298,7 +298,7 @@ impl Store {
         let a = match &p.a {
             Entry::Var(v) => Ok(Entry::Var(v.clone())),
             Entry::Lit(a) => {
-                if let Some(id) = self.get_attribute_id(a.clone()) {
+                if let Some(id) = self.get_attribute_id(&a) {
                     Ok(Entry::Lit(id))
                 } else {
                     Err("Id not found".to_string())
