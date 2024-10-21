@@ -10,6 +10,7 @@ use crate::{
     Attribute, Entity, Result, Value,
 };
 
+#[derive(Debug, PartialEq)]
 pub enum Api {
     Return,
     List(Vec<Api>),
@@ -237,6 +238,43 @@ impl<'de> MapAccess<'de> for PullValueMapAccess<'de> {
     }
 }
 
+#[macro_export]
+macro_rules! pull {
+    // List done
+    (@list [$($elems:expr),*]) => {
+        crate::pull::Api::List(vec![$($elems,)*])
+    };
+
+    // Next In
+    (@list [$($elems:expr),*] $a:literal {$($sub:tt)*} $($rest:tt)*) => {
+        pull!(@list [$($elems,)* $crate::pull::Api::In($crate::Attribute($a.to_string()), Box::new(pull!({ $($sub)* })))] $($rest)*)
+    };
+
+    // Next Back
+    (@list [$($elems:expr),*] <- $a:literal {$($sub:tt)*} $($rest:tt)*) => {
+        pull!(@list [$($elems,)* $crate::pull::Api::Back($crate::Attribute($a.to_string()), Box::new(pull!({ $($sub)* })))] $($rest)*)
+    };
+
+    // Next simple attribute
+    (@list [$($elems:expr),*] $a:literal $($rest:tt)*) => {
+        pull!(@list [$($elems,)* $crate::pull::Api::In(Attribute($a.to_string()), Box::new($crate::pull::Api::Return))] $($rest)*)
+    };
+
+    // Next simple attribute back
+    (@list [$($elems:expr),*] <- $a:literal $($rest:tt)*) => {
+        pull!(@list [$($elems,)* $crate::pull::Api::Back(Attribute($a.to_string()), Box::new($crate::pull::Api::Return))] $($rest)*)
+    };
+
+    // Comma
+    (@list [$($elems:expr),*] , $($rest:tt)*) => {
+        pull!(@list [$($elems),*] $($rest)*)
+    };
+
+    ({ $($tt:tt)+ }) => {
+        pull!(@list [] $($tt)*)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -247,8 +285,8 @@ mod tests {
     use super::Api;
 
     #[test]
-    fn pull() {
-        let api = Api::List(vec![
+    fn macro_() {
+        let expected = Api::List(vec![
             Api::In(Attribute("movie/title".to_string()), Box::new(Api::Return)),
             Api::In(
                 Attribute("movie/cast".to_string()),
@@ -256,14 +294,39 @@ mod tests {
                     Api::In(Attribute("person/name".to_string()), Box::new(Api::Return)),
                     Api::Back(
                         Attribute("movie/cast".to_string()),
-                        Box::new(Api::In(
+                        Box::new(Api::List(vec![Api::In(
                             Attribute("movie/title".to_string()),
                             Box::new(Api::Return),
-                        )),
+                        )])),
                     ),
                 ])),
             ),
         ]);
+
+        let actual = pull!({
+            "movie/title",
+            "movie/cast" {
+                "person/name",
+                <- "movie/cast" {
+                    "movie/title"
+                }
+            }
+        });
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn pull() {
+        let api = pull!({
+            "movie/title",
+            "movie/cast" {
+                "person/name",
+                <- "movie/cast" {
+                    "movie/title"
+                }
+            }
+        });
 
         #[derive(Deserialize, Debug, PartialEq)]
         struct MovieWithCast {
