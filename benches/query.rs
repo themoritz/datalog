@@ -6,6 +6,7 @@ use datalog::{
     movies::STORE,
     query,
     query::{Entry, Pattern, Query, Var, Where},
+    pull::{Api, PullValue},
     where_, Attribute, Value,
 };
 
@@ -24,9 +25,33 @@ fn run_query(name: &str) -> HashSet<Vec<Value>> {
     q.qeval(&STORE).unwrap()
 }
 
+fn run_pull(e: u64) -> PullValue {
+    let api = Api::List(vec![
+        Api::In(Attribute("movie/title".to_string()), Box::new(Api::Return)),
+        Api::In(
+            Attribute("movie/cast".to_string()),
+            Box::new(Api::List(vec![
+                Api::In(Attribute("person/name".to_string()), Box::new(Api::Return)),
+                Api::Back(
+                    Attribute("movie/cast".to_string()),
+                    Box::new(Api::In(
+                        Attribute("movie/title".to_string()),
+                        Box::new(Api::Return),
+                    )),
+                ),
+            ])),
+        ),
+    ]);
+
+    api.pull(&Value::Ref(e), &STORE).unwrap()
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("arnold", |b| {
         b.iter(|| run_query(black_box("Arnold Schwarzenegger")))
+    });
+    c.bench_function("pull", |b| {
+        b.iter(|| run_pull(black_box(202)))
     });
 }
 

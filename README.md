@@ -4,7 +4,8 @@
 - [x] Indices
 - [x] Persistence
 - [ ] Rules
-- [ ] Pull API (and convert into Rust types)
+- [x] Pull API (and convert into Rust types)
+  - [ ] Pull Query Macro
 - [ ] Cache queries
 - [ ] Upserts
 - [x] Schema

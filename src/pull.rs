@@ -10,7 +10,7 @@ use crate::{
     Attribute, Entity, Result, Value,
 };
 
-enum Api {
+pub enum Api {
     Return,
     List(Vec<Api>),
     In(Attribute, Box<Api>),
@@ -105,7 +105,7 @@ impl Api {
 }
 
 #[derive(PartialEq, Debug)]
-enum PullValue {
+pub enum PullValue {
     Missing,
     Lit(Value),
     List(Vec<PullValue>),
