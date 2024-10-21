@@ -263,7 +263,7 @@ impl Pattern<Entity> {
             Entry::Var(ref v) => {
                 let val = frame.bound.get(v)?;
                 match val {
-                    Value::Int(e) => Some(Entity(*e)),
+                    Value::Ref(e) => Some(Entity(*e)),
                     _ => None,
                 }
             }
