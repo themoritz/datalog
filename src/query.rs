@@ -337,90 +337,95 @@ impl Frame {
 // Macros
 #[macro_export]
 macro_rules! query {
-    {
-        find: [ $(?$var:ident),* ],
-        where: [ $($where_:tt)+ ]
-    } => {{
-        let exprs = vec![$(where_!($where_)),*];
-        let mut iter = exprs.into_iter();
-        let first = iter.next().unwrap();
-        Query {
-            find: vec![$(Var(stringify!($var).to_string()), )*],
-            where_: iter.fold(first, |acc, e| Where::and(acc, e))
+    (find: [ $(?$var:ident),* ], where: [ $($tt:tt)* ]) => {
+        $crate::query::Query {
+            find: vec![$(query!(@var ?$var)),*],
+            where_: query!(@where (and) [] $($tt)*)
         }
-    }};
-}
+    };
 
-#[macro_export]
-macro_rules! where_ {
-    ([ $e:expr, :$a:ident$(/$b:ident)* $v:expr ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Lit(Entity($e)),
-            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
-            v: Entry::Lit(Value::from($v)),
+    // VAR //
+
+    (@var ?$var:ident) => {
+        $crate::query::Var(stringify!($var).to_string())
+    };
+
+    // ENTRY //
+
+    (@entry ?$var:ident) => {
+        $crate::query::Entry::Var(query!(@var ?$var))
+    };
+
+    (@entry $val:expr) => {
+        $crate::query::Entry::Lit($crate::Value::from($val))
+    };
+
+    (@entry_entity $val:expr) => {
+        $crate::query::Entry::Lit(Entity($val))
+    };
+
+    (@entry_attr $var:literal) => {
+        $crate::query::Entry::Lit($crate::Attribute($var.to_string()))
+    };
+
+    // PATTERN //
+
+    // Done
+    (@pattern ($e:expr) ($a:expr) ($v:expr)) => {
+        $crate::query::Where::Pattern($crate::query::Pattern {
+            e: $e,
+            a: $a,
+            v: $v
         })
     };
-    ([ $e:expr, :$a:ident$(/$b:ident)* ?$v:ident ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Lit(Entity($e)),
-            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
-            v: Entry::Var(Var(stringify!($v).to_string())),
-        })
+
+    // Fill entity for vars
+    (@pattern () () () ?$var:ident, $($rest:tt)+) => {
+        query!(@pattern (query!(@entry ?$var)) () () $($rest)+)
     };
-    ([ $e:expr, ?$a:ident $v:expr ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Lit(Entity($e)),
-            a: Entry::Var(Var(stringify!($a).to_string())),
-            v: Entry::Lit(Value::from($v)),
-        })
+
+    // Fill entity for vals
+    (@pattern () () () $val:expr, $($rest:tt)+) => {
+        query!(@pattern (query!(@entry_entity $val)) () () $($rest)+)
     };
-    ([ $e:expr, ?$a:ident ?$v:ident ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Lit(Entity($e)),
-            a: Entry::Var(Var(stringify!($a).to_string())),
-            v: Entry::Var(Var(stringify!($v).to_string())),
-        })
+
+    // Fill attribute and value for var attributes
+    (@pattern ($e:expr) () () ?$var:ident = $($rest:tt)+) => {
+        query!(@pattern ($e) (query!(@entry ?$var)) (query!(@entry $($rest)+)))
     };
-    ([ ?$e:ident, :$a:ident$(/$b:ident)* $v:expr ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Var(Var(stringify!($e).to_string())),
-            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
-            v: Entry::Lit(Value::from($v)),
-        })
+
+    // Fill attribute and value for val attributes
+    (@pattern ($e:expr) () () $val:literal = $($rest:tt)+) => {
+        query!(@pattern ($e) (query!(@entry_attr $val)) (query!(@entry $($rest)+)))
     };
-    ([ ?$e:ident, :$a:ident$(/$b:ident)* ?$v:ident ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Var(Var(stringify!($e).to_string())),
-            a: Entry::Lit(Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string())),
-            v: Entry::Var(Var(stringify!($v).to_string())),
-        })
-    };
-    ([ ?$e:ident, ?$a:ident $v:expr ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Var(Var(stringify!($e).to_string())),
-            a: Entry::Var(Var(stringify!($a).to_string())),
-            v: Entry::Lit(Value::from($v)),
-        })
-    };
-    ([ ?$e:ident, ?$a:ident ?$v:ident ]) => {
-        Where::Pattern(Pattern {
-            e: Entry::Var(Var(stringify!($e).to_string())),
-            a: Entry::Var(Var(stringify!($a).to_string())),
-            v: Entry::Var(Var(stringify!($v).to_string())),
-        })
-    };
-    ((or $($clause:tt)+)) => {{
-        let exprs = vec![$(where_!($clause)),*];
-        let mut iter = exprs.into_iter();
+
+    // WHERE //
+
+    (@where ($cons:ident) [$($elems:expr,)*]) => {{
+        let mut iter = vec![$($elems),*].into_iter();
         let first = iter.next().unwrap();
-        iter.fold(first, |acc, e| Where::or(acc, e))
+        iter.fold(first, |acc, e| $crate::query::Where::$cons(acc, e))
     }};
-    ((and $($clause:tt)+)) => {{
-        let exprs = vec![$(where_!($clause)),*];
-        let mut iter = exprs.into_iter();
-        let first = iter.next().unwrap();
-        iter.fold(first, |acc, e| Where::and(acc, e))
-    }};
+
+    // Next pattern
+    (@where ($cons:ident) [$($elems:expr,)*] ($($tt:tt)+) $($rest:tt)*) => {
+        query!(@where ($cons) [$($elems,)* query!(@pattern () () () $($tt)+),] $($rest)*)
+    };
+
+    // Next or
+    (@where ($cons:ident) [$($elems:expr,)*] or: [ $($tt:tt)* ] $($rest:tt)*) => {
+        query!(@where ($cons) [$($elems,)* query!(@where (or) [] $($tt)*),] $($rest)*)
+    };
+
+    // Next and
+    (@where ($cons:ident) [$($elems:expr,)*] and: [ $($tt:tt)* ] $($rest:tt)*) => {
+        query!(@where ($cons) [$($elems,)* query!(@where (and) [] $($tt)*),] $($rest)*)
+    };
+
+    // Comma
+    (@where ($cons:ident) [$($elems:expr,)*], $($rest:tt)*) => {
+        query!(@where ($cons) [$($elems,)*] $($rest)*)
+    }
 }
 
 #[cfg(test)]
@@ -494,18 +499,18 @@ mod tests {
         let actual = query! {
             find: [?a, ?b],
             where: [
-                [3, :foo 3]
-                [1, :bar ?a]
-                [0, ?b "M"]
-                [0, ?b ?a]
-                (or
-                    [?x, :foo 3]
-                    [?x, :bar ?a]
-                )
-                (and
-                    [?x, ?b "M"]
-                    [?x, ?b ?a]
-                )
+                (3, "foo" = 3),
+                (1, "bar" = ?a),
+                (0, ?b = "M"),
+                (0, ?b = ?a),
+                or: [
+                    (?x, "foo" = 3),
+                    (?x, "bar" = ?a)
+                ],
+                and: [
+                    (?x, ?b = "M"),
+                    (?x, ?b = ?a)
+                ]
             ]
         };
 
@@ -522,17 +527,19 @@ mod tests {
 
         let mut frame = Frame::new();
         pattern
-            .match_(&mut frame, &datom![100, :name "Moritz"])
+            .match_(&mut frame, &datom!(100, "name" = "Moritz"))
             .unwrap();
         let row = frame.row(&[Var("a".to_string())]).unwrap();
         assert_eq!(row, vec![Value::Ref(100)]);
 
-        assert!(pattern.match_(&mut frame, &datom![100, :name 1]).is_err());
         assert!(pattern
-            .match_(&mut frame, &datom![100, :name "Moritz"])
+            .match_(&mut frame, &datom!(100, "name" = 1))
+            .is_err());
+        assert!(pattern
+            .match_(&mut frame, &datom!(100, "name" = "Moritz"))
             .is_ok());
         assert!(pattern
-            .match_(&mut frame, &datom![200, :name "Moritz"])
+            .match_(&mut frame, &datom!(200, "name" = "Moritz"))
             .is_err());
     }
 
@@ -541,9 +548,9 @@ mod tests {
         let q = query! {
             find: [?p, ?name],
             where: [
-                [?p, :name "Moritz"]
-                [?p, :name ?name]
-                [?p, :age 39]
+                (?p, "name" = "Moritz"),
+                (?p, "name" = ?name),
+                (?p, "age" = 39)
             ]
         };
 
@@ -555,11 +562,11 @@ mod tests {
         let q = query! {
             find: [?e],
             where: [
-                (or
-                    [?e, :name "Piet"]
-                    [?e, :name "Moritz"]
-                )
-                [?e, :age 39]
+                or: [
+                    (?e, "name" = "Piet"),
+                    (?e, "name" = "Moritz")
+                ],
+                (?e, "age" = 39)
             ]
         };
 
@@ -571,8 +578,8 @@ mod tests {
         let q = query! {
             find: [?doc],
             where: [
-                [?e, :db/ident "name"]
-                [?e, :db/doc ?doc]
+                (?e, "db/ident" = "name"),
+                (?e, "db/doc" = ?doc)
             ]
         };
 
@@ -581,7 +588,7 @@ mod tests {
         let q = query! {
             find: [?e],
             where: [
-                [?e, :db/ident "db/ident"]
+                (?e, "db/ident" = "db/ident")
             ]
         };
 
@@ -593,8 +600,8 @@ mod tests {
         let q = query! {
             find: [?year],
             where: [
-                [?id, :movie/title "Alien"]
-                [?id, :movie/year ?year]
+                (?id, "movie/title" = "Alien"),
+                (?id, "movie/year" = ?year)
             ]
         };
 
@@ -606,7 +613,7 @@ mod tests {
         let q = query! {
             find: [?attr, ?value],
             where: [
-                [200, ?attr ?value]
+                (200, ?attr = ?value)
             ]
         };
 
@@ -629,11 +636,11 @@ mod tests {
         let q = query! {
             find: [?director, ?movie],
             where: [
-                [?a, :person/name "Arnold Schwarzenegger"]
-                [?m, :movie/cast ?a]
-                [?m, :movie/title ?movie]
-                [?m, :movie/director ?d]
-                [?d, :person/name ?director]
+                (?a, "person/name" = "Arnold Schwarzenegger"),
+                (?m, "movie/cast" = ?a),
+                (?m, "movie/title" = ?movie),
+                (?m, "movie/director" = ?d),
+                (?d, "person/name" = ?director)
             ]
         };
 
@@ -655,8 +662,8 @@ mod tests {
         let q = query! {
             find: [?title],
             where: [
-                [?m, :movie/title ?title]
-                [?m, :movie/year 1985]
+                (?m, "movie/title" = ?title),
+                (?m, "movie/year" = 1985)
             ]
         };
 
@@ -675,8 +682,8 @@ mod tests {
         let q = query! {
             find: [?attr],
             where: [
-                [?m, :movie/title "Commando"]
-                [?m, ?attr ?v]
+                (?m, "movie/title" = "Commando"),
+                (?m, ?attr = ?v)
             ]
         };
 

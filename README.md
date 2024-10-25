@@ -5,7 +5,7 @@
 - [x] Persistence
 - [ ] Rules
 - [x] Pull API (and convert into Rust types)
-  - [ ] Pull Query Macro
+  - [x] Pull Query Macro
 - [ ] Cache queries
 - [ ] Upserts
 - [x] Schema

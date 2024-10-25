@@ -174,10 +174,10 @@ pub struct Datom {
 
 #[macro_export]
 macro_rules! datom {
-    [ $e:expr, :$a:ident$(/$b:ident)* $v:expr ] => {
+    ($e:expr, $a:literal = $v:expr) => {
         crate::Datom {
             e: crate::Entity($e),
-            a: crate::Attribute(concat!(stringify!($a) $(, "/", stringify!($b) )* ).to_string()),
+            a: crate::Attribute($a.to_string()),
             v: crate::Value::from($v),
         }
     };
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn macro_datom() {
-        let datom = datom![20, :person/name "M"];
+        let datom = datom!(20, "person/name" = "M");
         assert_eq!(
             datom,
             Datom {

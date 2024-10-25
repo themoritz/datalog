@@ -15,11 +15,11 @@ fn run_query(name: &str) -> HashSet<Vec<Value>> {
     let q = query! {
         find: [?director, ?movie],
         where: [
-            [?a, :person/name name]
-            [?m, :movie/cast ?a]
-            [?m, :movie/title ?movie]
-            [?m, :movie/director ?d]
-            [?d, :person/name ?director]
+            (?a, "person/name" = name),
+            (?m, "movie/cast" = ?a),
+            (?m, "movie/title" = ?movie),
+            (?m, "movie/director" = ?d),
+            (?d, "person/name" = ?director)
         ]
     };
 

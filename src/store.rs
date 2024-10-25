@@ -455,8 +455,8 @@ mod tests {
         s.add_attribute("foo", Type::Int, Cardinality::One, "")
             .unwrap();
 
-        s.insert(datom!(100, :foo 4)).unwrap();
+        s.insert(datom!(100, "foo" = 4)).unwrap();
 
-        assert!(s.insert(datom!(200, :foo "Bar")).is_err());
+        assert!(s.insert(datom!(200, "foo" = "Bar")).is_err());
     }
 }

@@ -246,12 +246,12 @@ macro_rules! pull {
     };
 
     // Next In
-    (@list [$($elems:expr),*] $a:literal {$($sub:tt)*} $($rest:tt)*) => {
+    (@list [$($elems:expr),*] $a:literal: {$($sub:tt)*} $($rest:tt)*) => {
         pull!(@list [$($elems,)* $crate::pull::Api::In($crate::Attribute($a.to_string()), Box::new(pull!({ $($sub)* })))] $($rest)*)
     };
 
     // Next Back
-    (@list [$($elems:expr),*] <- $a:literal {$($sub:tt)*} $($rest:tt)*) => {
+    (@list [$($elems:expr),*] <- $a:literal: {$($sub:tt)*} $($rest:tt)*) => {
         pull!(@list [$($elems,)* $crate::pull::Api::Back($crate::Attribute($a.to_string()), Box::new(pull!({ $($sub)* })))] $($rest)*)
     };
 
@@ -305,9 +305,9 @@ mod tests {
 
         let actual = pull!({
             "movie/title",
-            "movie/cast" {
+            "movie/cast": {
                 "person/name",
-                <- "movie/cast" {
+                <- "movie/cast": {
                     "movie/title"
                 }
             }
@@ -320,9 +320,9 @@ mod tests {
     fn pull() {
         let api = pull!({
             "movie/title",
-            "movie/cast" {
+            "movie/cast": {
                 "person/name",
-                <- "movie/cast" {
+                <- "movie/cast": {
                     "movie/title"
                 }
             }
