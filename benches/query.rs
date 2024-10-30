@@ -8,7 +8,7 @@ use datalog::{
     pull::PullValue,
     query,
     query::{Entry, Pattern, Query, Var, Where},
-    where_, Attribute, Value,
+    Attribute, Value,
 };
 
 fn run_query(name: &str) -> HashSet<Vec<Value>> {
@@ -29,9 +29,9 @@ fn run_query(name: &str) -> HashSet<Vec<Value>> {
 fn run_pull(e: u64) -> PullValue {
     let api = pull!({
         "movie/title",
-        "movie/cast" {
+        "movie/cast": {
             "person/name",
-            <- "movie/cast" {
+            <- "movie/cast": {
                 "movie/title"
             }
         }
