@@ -14,6 +14,7 @@ pub mod persist;
 pub mod pull;
 pub mod query;
 pub mod store;
+pub mod transact;
 
 type Result<T> = core::result::Result<T, String>;
 
