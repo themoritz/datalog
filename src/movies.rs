@@ -16,6 +16,9 @@ lazy_static::lazy_static! {
         store
             .add_attribute("age", Type::Int, Cardinality::One, "")
             .unwrap();
+        store
+            .add_attribute("friend", Type::Ref, Cardinality::Many, "Friend")
+            .unwrap();
 
         let datoms = vec![
             datom!(100, "name" = "Moritz"),

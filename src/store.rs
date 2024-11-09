@@ -21,7 +21,7 @@ pub enum Cardinality {
     Many,
 }
 
-#[derive(Default, PartialEq, Debug)]
+#[derive(Default, PartialEq, Debug, Clone)]
 struct Builtins {
     ident: Entity,
     type_: Entity,
@@ -55,7 +55,7 @@ impl Builtins {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Store {
     eav: BTreeSet<EAV>,
     ave: BTreeSet<AVE>,
@@ -146,7 +146,7 @@ impl Store {
         cardinality: Cardinality,
         doc: &str,
     ) -> Result<()> {
-        if let Some(_) = self.get_attribute_id(&Attribute(name.to_string())) {
+        if let Ok(_) = self.get_attribute_id(&Attribute(name.to_string())) {
             return Err("Attribute already defined".to_string());
         }
 
@@ -174,34 +174,22 @@ impl Store {
         self.next_id = self.next_id.max(e.0 + 1);
     }
 
+    fn retract_raw(&mut self, e: Entity, a: Entity, v: Value) {
+        self.eav.remove(&EAV { e, a, v: v.clone() });
+        self.ave.remove(&AVE { a, v, e });
+    }
+
     pub fn insert(&mut self, datom: Datom) -> Result<()> {
-        let a = match self.get_attribute_id(&datom.a) {
-            Some(id) => Ok(id),
-            None => Err(format!("Could not find id for attribute `{}`", datom.a.0)),
-        }?;
-
-        if let Some(expected) = self.get_attribute_type(a) {
-            match (expected, &datom.v) {
-                (Type::Bool, Value::Bool(_)) => {}
-                (Type::Float, Value::Float(_)) => {}
-                (Type::Int, Value::Int(_)) => {}
-                (Type::Ref, Value::Ref(_)) => {}
-                (Type::Str, Value::Str(_)) => {}
-                _ => {
-                    return Err(format!(
-                        "Invalid type for attribute `{}`: Expected {:?}, got {:?}",
-                        datom.a.0, expected, datom.v
-                    ))
-                }
-            }
-        } else {
-            return Err(format!(
-                "Could not determine required type for attribute `{}`. DB corrupt?",
-                datom.a.0
-            ));
-        }
-
+        let a = self.get_attribute_id(&datom.a)?;
+        self.check_attribute_type(a, &datom.v)?;
         self.insert_raw(datom.e, a, datom.v);
+        Ok(())
+    }
+
+    pub fn retract(&mut self, datom: Datom) -> Result<()> {
+        let a = self.get_attribute_id(&datom.a)?;
+
+        self.retract_raw(datom.e, a, datom.v);
 
         Ok(())
     }
@@ -258,69 +246,108 @@ impl Store {
             .map(|eav| eav.e)
     }
 
-    pub fn get_attribute_id(&self, a: &Attribute) -> Option<Entity> {
-        self.get_entity_by_ident(&a.0)
+    pub fn get_attribute_id(&self, a: &Attribute) -> Result<Entity> {
+        match self.get_entity_by_ident(&a.0) {
+            Some(e) => Ok(e),
+            None => Err(format!("Could not find id for attribute `{}`", a.0)),
+        }
     }
 
-    fn get_attribute(&self, e: Entity) -> Option<Attribute> {
-        self.iter_entity_attribute(e, self.builtins.ident)
-            .next()
-            .and_then(|eav| match eav.v {
-                Value::Str(a) => Some(Attribute(a)),
-                _ => None,
-            })
+    fn get_attribute(&self, e: Entity) -> Result<Attribute> {
+        match self.iter_entity_attribute(e, self.builtins.ident).next() {
+            None => Err(format!("Could not get attribute name for entity {}", e.0)),
+            Some(eav) => match eav.v {
+                Value::Str(a) => Ok(Attribute(a)),
+                _ => Err(format!(
+                    "Attribute name value should be string, found {}. DB corrupt?",
+                    eav.v
+                )),
+            },
+        }
     }
 
-    fn get_attribute_type(&self, e: Entity) -> Option<Type> {
-        self.iter_entity_attribute(e, self.builtins.type_)
-            .next()
-            .and_then(|eav| match eav.v {
+    fn get_attribute_type(&self, e: Entity) -> Result<Type> {
+        match self.iter_entity_attribute(e, self.builtins.type_).next() {
+            None => {
+                let a = self.get_attribute(e)?;
+                Err(format!("Could not get type for attribute {a}. DB corrupt?"))
+            }
+            Some(eav) => match eav.v {
                 Value::Ref(i) => {
                     if i == self.builtins.float.0 {
-                        Some(Type::Float)
+                        Ok(Type::Float)
                     } else if i == self.builtins.int.0 {
-                        Some(Type::Int)
+                        Ok(Type::Int)
                     } else if i == self.builtins.string.0 {
-                        Some(Type::Str)
+                        Ok(Type::Str)
                     } else if i == self.builtins.ref_.0 {
-                        Some(Type::Ref)
+                        Ok(Type::Ref)
                     } else if i == self.builtins.bool.0 {
-                        Some(Type::Bool)
+                        Ok(Type::Bool)
                     } else {
-                        None
+                        Err(format!(
+                            "Type calue doesn't match type builtin. DB corrupt?"
+                        ))
                     }
                 }
-                _ => None,
-            })
+                _ => Err(format!(
+                    "Type value expected as ref, found {}. DB corrupt?",
+                    eav.v
+                )),
+            },
+        }
     }
 
-    pub fn get_attribute_cardinality(&self, e: Entity) -> Option<Cardinality> {
-        self.iter_entity_attribute(e, self.builtins.card)
-            .next()
-            .and_then(|eav| match eav.v {
+    #[must_use]
+    pub fn check_attribute_type(&self, a: Entity, v: &Value) -> Result<()> {
+        let expected = self.get_attribute_type(a)?;
+        match (expected, v) {
+            (Type::Bool, Value::Bool(_)) => Ok(()),
+            (Type::Float, Value::Float(_)) => Ok(()),
+            (Type::Int, Value::Int(_)) => Ok(()),
+            (Type::Ref, Value::Ref(_)) => Ok(()),
+            (Type::Str, Value::Str(_)) => Ok(()),
+            _ => {
+                let a = self.get_attribute(a)?;
+                Err(format!(
+                    "Invalid type for attribute `{a}`: Expected {expected:?}, got {v:?}"
+                ))
+            }
+        }
+    }
+
+    pub fn get_attribute_cardinality(&self, e: Entity) -> Result<Cardinality> {
+        match self.iter_entity_attribute(e, self.builtins.card).next() {
+            None => {
+                let a = self.get_attribute(e)?;
+                Err(format!(
+                    "Could not determine cardinality of attribute `{a}`. DB corrupt?"
+                ))
+            }
+            Some(eav) => match eav.v {
                 Value::Ref(i) => {
                     if i == self.builtins.one.0 {
-                        Some(Cardinality::One)
+                        Ok(Cardinality::One)
                     } else if i == self.builtins.many.0 {
-                        Some(Cardinality::Many)
+                        Ok(Cardinality::Many)
                     } else {
-                        None
+                        Err(format!(
+                            "Cardinality value doesn't match cardinality builtin. DB corrupt?"
+                        ))
                     }
                 }
-                _ => None,
-            })
+                _ => Err(format!(
+                    "Cardinality value expected as ref, found {}. DB corrupt?",
+                    eav.v
+                )),
+            },
+        }
     }
 
     fn resolve_pattern(&self, p: &Pattern<Attribute>) -> Result<Pattern<Entity>> {
         let a = match &p.a {
             Entry::Var(v) => Ok(Entry::Var(v.clone())),
-            Entry::Lit(a) => {
-                if let Some(id) = self.get_attribute_id(&a) {
-                    Ok(Entry::Lit(id))
-                } else {
-                    Err("Id not found".to_string())
-                }
-            }
+            Entry::Lit(a) => self.get_attribute_id(&a).map(Entry::Lit),
         }?;
 
         Ok(Pattern {
@@ -345,7 +372,7 @@ impl Store {
                 row.into_iter()
                     .map(|val| {
                         if let Value::Ref(i) = val {
-                            if let Some(Attribute(a)) = self.get_attribute(Entity(i)) {
+                            if let Ok(Attribute(a)) = self.get_attribute(Entity(i)) {
                                 Value::Str(a.clone())
                             } else {
                                 val

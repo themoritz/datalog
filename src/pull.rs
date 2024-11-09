@@ -37,40 +37,31 @@ impl Api {
             }
             Self::In(a, sub) => {
                 if let Value::Ref(e) = start {
-                    if let Some(a_e) = store.get_attribute_id(a) {
-                        let values: Vec<Value> = store
-                            .iter_entity_attribute(Entity(*e), a_e)
-                            .map(|eav| eav.v)
-                            .collect();
+                    let a_e = store.get_attribute_id(a)?;
+                    let values: Vec<Value> = store
+                        .iter_entity_attribute(Entity(*e), a_e)
+                        .map(|eav| eav.v)
+                        .collect();
 
-                        let value = match store.get_attribute_cardinality(a_e) {
-                            Some(Cardinality::One) => {
-                                if let Some(v) = values.first() {
-                                    sub.pull(&v, store)?
-                                } else {
-                                    PullValue::Missing
-                                }
+                    let value = match store.get_attribute_cardinality(a_e)? {
+                        Cardinality::One => {
+                            if let Some(v) = values.first() {
+                                sub.pull(&v, store)?
+                            } else {
+                                PullValue::Missing
                             }
-                            Some(Cardinality::Many) => PullValue::List(
-                                values
-                                    .into_iter()
-                                    .map(|v| sub.pull(&v, store))
-                                    .collect::<Result<Vec<_>>>()?,
-                            ),
-                            None => {
-                                return Err(format!(
-                                "Could not determine cardinality of attribute `{}`. DB corrupt?",
-                                a
-                            ))
-                            }
-                        };
+                        }
+                        Cardinality::Many => PullValue::List(
+                            values
+                                .into_iter()
+                                .map(|v| sub.pull(&v, store))
+                                .collect::<Result<Vec<_>>>()?,
+                        ),
+                    };
 
-                        let mut record = HashMap::new();
-                        record.insert(a.clone(), value);
-                        Ok(PullValue::Record(record))
-                    } else {
-                        Err(format!("Attribute `{}` does not exist", a))
-                    }
+                    let mut record = HashMap::new();
+                    record.insert(a.clone(), value);
+                    Ok(PullValue::Record(record))
                 } else {
                     Err(format!(
                         "Can only drill into entity values, got `{}`",
@@ -79,27 +70,24 @@ impl Api {
                 }
             }
             Self::Back(a, sub) => {
-                if let Some(a_e) = store.get_attribute_id(a) {
-                    let values: Vec<Entity> = store
-                        .iter_attribute_value(a_e, start.clone())
-                        .map(|eav| eav.e)
-                        .collect();
+                let a_e = store.get_attribute_id(a)?;
+                let values: Vec<Entity> = store
+                    .iter_attribute_value(a_e, start.clone())
+                    .map(|eav| eav.e)
+                    .collect();
 
-                    // Always a list since we're hopping back, so many entities
-                    // will have an attribute.
-                    let value = PullValue::List(
-                        values
-                            .into_iter()
-                            .map(|v| sub.pull(&Value::Ref(v.0), store))
-                            .collect::<Result<Vec<_>>>()?,
-                    );
+                // Always a list since we're hopping back, so many entities
+                // will have an attribute.
+                let value = PullValue::List(
+                    values
+                        .into_iter()
+                        .map(|v| sub.pull(&Value::Ref(v.0), store))
+                        .collect::<Result<Vec<_>>>()?,
+                );
 
-                    let mut record = HashMap::new();
-                    record.insert(a.clone(), value);
-                    Ok(PullValue::Record(record))
-                } else {
-                    Err(format!("Attribute `{}` does not exist", a))
-                }
+                let mut record = HashMap::new();
+                record.insert(a.clone(), value);
+                Ok(PullValue::Record(record))
             }
         }
     }

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{store::Store, Attribute, Result};
+use crate::{
+    store::{Cardinality, Store},
+    Attribute, Result,
+};
 
 #[derive(Debug, Clone)]
 pub enum Entity {
@@ -69,34 +72,95 @@ impl Transact {
     fn compile_rec(self, store: &mut Store, e: Entity) -> Result<Vec<Update>> {
         match self {
             Transact::WithEntity { e, sub } => sub.compile_rec(store, e),
-            Transact::AddValue { a, v } => Ok(vec![Update {
-                add: true,
-                e: e.to_entity()?,
-                a,
-                v: v.to_value()?,
-            }]),
+            Transact::AddValue { a, v } => {
+                let e = e.to_entity()?;
+                let a = store.get_attribute_id(&a)?;
+                let v = v.to_value()?;
+                store.check_attribute_type(a, &v)?;
+
+                let mut result = vec![];
+                if let Cardinality::One = store.get_attribute_cardinality(a)? {
+                    result.extend(store.iter_entity_attribute(e, a).map(|eav| Update {
+                        add: false,
+                        e: eav.e,
+                        a: eav.a,
+                        v: eav.v,
+                    }))
+                }
+
+                result.push(Update { add: true, e, a, v });
+
+                Ok(result)
+            }
             Transact::AddComponent { a, sub } => {
+                let e = e.to_entity()?;
+                let a = store.get_attribute_id(&a)?;
+                // Don't want to create id here yet, just checking type:
+                store.check_attribute_type(a, &crate::Value::Ref(0))?;
+
+                let mut result = vec![];
+
+                if let Cardinality::One = store.get_attribute_cardinality(a)? {
+                    for eav in store.iter_entity_attribute(e, a).collect::<Vec<_>>() {
+                        let comp_e = match &eav.v {
+                            crate::Value::Ref(e) => Ok(crate::Entity(*e)),
+                            _ => Err(format!("Expected Ref value; found {}", eav.v)),
+                        }?;
+                        result.append(
+                            &mut Transact::Retract.compile_rec(store, Entity::Entity(comp_e))?,
+                        );
+                        result.push(Update {
+                            add: false,
+                            e: eav.e,
+                            a: eav.a,
+                            v: eav.v,
+                        });
+                    }
+                }
+
                 let new_e = store.next_entity_id();
-                let mut result = vec![Update {
+                result.push(Update {
                     add: true,
-                    e: e.to_entity()?,
+                    e,
                     a,
                     v: crate::Value::Ref(new_e.0),
-                }];
+                });
                 result.append(&mut sub.compile_rec(store, Entity::Entity(new_e))?);
                 Ok(result)
             }
-            Transact::RetractValue { a, v } => Ok(vec![Update {
-                add: false,
-                e: e.to_entity()?,
-                a,
-                v: v.to_value()?,
-            }]),
+            Transact::RetractValue { a, v } => {
+                let a = store.get_attribute_id(&a)?;
+                Ok(vec![Update {
+                    add: false,
+                    e: e.to_entity()?,
+                    a,
+                    v: v.to_value()?,
+                }])
+            }
             Transact::RetractAttribute { a } => {
-                todo!()
+                let a = store.get_attribute_id(&a)?;
+                Ok(store
+                    .iter_entity_attribute(e.to_entity()?, a)
+                    .map(|eav| Update {
+                        add: false,
+                        e: eav.e,
+                        a: eav.a,
+                        v: eav.v,
+                    })
+                    .collect())
             }
             Transact::Retract => {
-                todo!()
+                // TODO: Retract components
+                // TODO: Retract links to entity (need vae index for this)
+                Ok(store
+                    .iter_entity(e.to_entity()?)
+                    .map(|eav| Update {
+                        add: false,
+                        e: eav.e,
+                        a: eav.a,
+                        v: eav.v,
+                    })
+                    .collect())
             }
             Transact::List(subs) => {
                 let nested = subs
@@ -160,7 +224,7 @@ impl Transact {
 pub struct Update {
     add: bool,
     e: crate::Entity,
-    a: Attribute,
+    a: crate::Entity,
     v: crate::Value,
 }
 
@@ -168,12 +232,12 @@ pub struct Update {
 mod test {
     use pretty_assertions::assert_eq;
 
-    use crate::{store::Store, Attribute};
+    use crate::{movies::DATA, Attribute};
 
     use super::{Entity, Transact, Update, Value};
 
     #[test]
-    fn compile() {
+    fn compile_add_component() {
         let tx = Transact::WithEntity {
             e: Entity::TempRef("a".to_string()),
             sub: Box::new(Transact::List(vec![
@@ -184,35 +248,94 @@ mod test {
                 Transact::AddComponent {
                     a: Attribute("friend".to_string()),
                     sub: Box::new(Transact::AddValue {
-                        a: Attribute("boss".to_string()),
-                        v: Value::TempRef("a".to_string()),
+                        a: Attribute("name".to_string()),
+                        v: Value::Value(crate::Value::Str("Piet".to_string())),
                     }),
                 },
             ])),
         };
 
-        let mut store = Store::new();
+        let mut store = DATA.clone();
 
         assert_eq!(
             tx.compile(&mut store).unwrap(),
             vec![
                 Update {
                     add: true,
-                    e: crate::Entity(11,),
-                    a: Attribute("age".to_string(),),
-                    v: crate::Value::Int(40,),
+                    e: crate::Entity(201),
+                    a: crate::Entity(12),
+                    v: crate::Value::Int(40),
                 },
                 Update {
                     add: true,
-                    e: crate::Entity(11,),
-                    a: Attribute("friend".to_string(),),
-                    v: crate::Value::Ref(12,),
+                    e: crate::Entity(201),
+                    a: crate::Entity(13),
+                    v: crate::Value::Ref(202),
                 },
                 Update {
                     add: true,
-                    e: crate::Entity(12,),
-                    a: Attribute("boss".to_string(),),
-                    v: crate::Value::Ref(11,),
+                    e: crate::Entity(202),
+                    a: crate::Entity(11),
+                    v: crate::Value::Str("Piet".to_string()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn compile_retract() {
+        let tx = Transact::WithEntity {
+            e: Entity::Entity(crate::Entity(100)),
+            sub: Box::new(Transact::Retract),
+        };
+
+        let mut store = DATA.clone();
+
+        assert_eq!(
+            tx.compile(&mut store).unwrap(),
+            vec![
+                Update {
+                    add: false,
+                    e: crate::Entity(100),
+                    a: crate::Entity(11),
+                    v: crate::Value::Str("Moritz".to_string()),
+                },
+                Update {
+                    add: false,
+                    e: crate::Entity(100),
+                    a: crate::Entity(12),
+                    v: crate::Value::Int(39),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn compile_upsert() {
+        let tx = Transact::WithEntity {
+            e: Entity::Entity(crate::Entity(100)),
+            sub: Box::new(Transact::AddValue {
+                a: Attribute("age".to_string()),
+                v: Value::Value(crate::Value::Int(40)),
+            }),
+        };
+
+        let mut store = DATA.clone();
+
+        assert_eq!(
+            tx.compile(&mut store).unwrap(),
+            vec![
+                Update {
+                    add: false,
+                    e: crate::Entity(100),
+                    a: crate::Entity(12),
+                    v: crate::Value::Int(39),
+                },
+                Update {
+                    add: true,
+                    e: crate::Entity(100),
+                    a: crate::Entity(12),
+                    v: crate::Value::Int(40),
                 },
             ]
         );
