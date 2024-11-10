@@ -29,6 +29,9 @@ add!(14, {
         "person/age": 3
     }
 })
+.and(retract!(14))
+
+add!(14, "person/name": ["Moritz"]);
 
 Compiles to
 
@@ -42,7 +45,7 @@ Compiles to
 
 retract!(14, "person/name"),
 retract!(14, "person/friend": Ref(15))
-retract!(14, "person/aliases" ["Troll", "Papa"])
+retract!(14, "person/aliases": ["Troll", "Papa"])
 
 Compiles to
 

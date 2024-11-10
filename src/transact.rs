@@ -5,6 +5,8 @@ use crate::{
     Attribute, Result,
 };
 
+struct Tmp<'a>(&'a str);
+
 #[derive(Debug, Clone)]
 pub enum Entity {
     Entity(crate::Entity),
@@ -22,10 +24,37 @@ impl Entity {
     }
 }
 
+impl From<u64> for Entity {
+    fn from(value: u64) -> Self {
+        Entity::Entity(crate::Entity(value))
+    }
+}
+
+impl<'a> From<Tmp<'a>> for Entity {
+    fn from(value: Tmp) -> Self {
+        Entity::TempRef(value.0.to_string())
+    }
+}
+
 #[derive(Debug)]
 pub enum Value {
     Value(crate::Value),
     TempRef(String),
+}
+
+impl<T> From<T> for Value
+where
+    crate::Value: From<T>,
+{
+    fn from(value: T) -> Self {
+        Value::Value(crate::Value::from(value))
+    }
+}
+
+impl<'a> From<Tmp<'a>> for Value {
+    fn from(value: Tmp) -> Self {
+        Value::TempRef(value.0.to_string())
+    }
 }
 
 impl Value {
@@ -50,7 +79,19 @@ pub enum Transact {
     List(Vec<Transact>),
 }
 
+// Something like this?
+enum AddValue {
+    Simple(Value),
+    List(Vec<Value>),
+    NewEntity(Transact),
+    NewEntities(Vec<Transact>)
+}
+
 impl Transact {
+    pub fn and(self, other: Self) -> Self {
+        Transact::List(vec![self, other])
+    }
+
     pub fn compile(self, store: &mut Store) -> Result<Vec<Update>> {
         let without_refs = self.resolve_temprefs(store);
 
@@ -234,22 +275,22 @@ mod test {
 
     use crate::{movies::DATA, Attribute};
 
-    use super::{Entity, Transact, Update, Value};
+    use super::{Entity, Tmp, Transact, Update};
 
     #[test]
     fn compile_add_component() {
         let tx = Transact::WithEntity {
-            e: Entity::TempRef("a".to_string()),
+            e: Tmp("a").into(),
             sub: Box::new(Transact::List(vec![
                 Transact::AddValue {
                     a: Attribute("age".to_string()),
-                    v: Value::Value(crate::Value::Int(40)),
+                    v: 40.into(),
                 },
                 Transact::AddComponent {
                     a: Attribute("friend".to_string()),
                     sub: Box::new(Transact::AddValue {
                         a: Attribute("name".to_string()),
-                        v: Value::Value(crate::Value::Str("Piet".to_string())),
+                        v: "Piet".into(),
                     }),
                 },
             ])),
@@ -316,7 +357,7 @@ mod test {
             e: Entity::Entity(crate::Entity(100)),
             sub: Box::new(Transact::AddValue {
                 a: Attribute("age".to_string()),
-                v: Value::Value(crate::Value::Int(40)),
+                v: 40.into(),
             }),
         };
 
