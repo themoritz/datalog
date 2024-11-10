@@ -60,6 +60,12 @@ impl Display for Attribute {
     }
 }
 
+impl From<&str> for Attribute {
+    fn from(value: &str) -> Self {
+        Attribute(value.to_string())
+    }
+}
+
 // Assuming Attribute can be deserialized from a string
 impl<'de> Deserializer<'de> for &'de Attribute {
     type Error = PullError;

@@ -14,6 +14,22 @@ pub enum Entity {
 }
 
 impl Entity {
+    fn resolve_tempref(
+        self,
+        mapping: &mut HashMap<String, crate::Entity>,
+        store: &mut Store,
+    ) -> Self {
+        match self {
+            Entity::Entity(e) => Entity::Entity(e),
+            Entity::TempRef(tempref) => Entity::Entity(
+                mapping
+                    .entry(tempref)
+                    .or_insert_with(|| store.next_entity_id())
+                    .clone(),
+            ),
+        }
+    }
+
     pub fn to_entity(self) -> Result<crate::Entity> {
         match self {
             Entity::Entity(e) => Ok(e),
@@ -58,6 +74,21 @@ impl<'a> From<Tmp<'a>> for Value {
 }
 
 impl Value {
+    fn resolve_tempref(
+        self,
+        mapping: &mut HashMap<String, crate::Entity>,
+        store: &mut Store,
+    ) -> Self {
+        match self {
+            Value::Value(v) => Value::Value(v),
+            Value::TempRef(tempref) => mapping
+                .entry(tempref)
+                .or_insert_with(|| store.next_entity_id())
+                .clone()
+                .into(),
+        }
+    }
+
     pub fn to_value(self) -> Result<crate::Value> {
         match self {
             Value::Value(v) => Ok(v),
@@ -70,21 +101,18 @@ impl Value {
 
 #[derive(Debug)]
 pub enum Transact {
-    WithEntity { e: Entity, sub: Box<Transact> },
-    AddValue { a: Attribute, v: Value },
-    AddComponent { a: Attribute, sub: Box<Transact> },
-    RetractValue { a: Attribute, v: Value },
-    RetractAttribute { a: Attribute },
-    Retract,
+    Add { e: Entity, add: Add },
+    RetractValue { e: Entity, a: Attribute, v: Value },
+    RetractAttribute { e: Entity, a: Attribute },
+    Retract { e: Entity },
     List(Vec<Transact>),
 }
 
-// Something like this?
-enum AddValue {
-    Simple(Value),
-    List(Vec<Value>),
-    NewEntity(Transact),
-    NewEntities(Vec<Transact>)
+#[derive(Debug)]
+pub enum Add {
+    Value { a: Attribute, v: Value },
+    Component { a: Attribute, sub: Box<Add> },
+    List(Vec<Add>),
 }
 
 impl Transact {
@@ -92,11 +120,45 @@ impl Transact {
         Transact::List(vec![self, other])
     }
 
-    pub fn compile(self, store: &mut Store) -> Result<Vec<Update>> {
-        let without_refs = self.resolve_temprefs(store);
+    fn compile(self, store: &mut Store) -> Result<Vec<Update>> {
+        let resolved = self.resolve_temprefs(store);
 
-        match without_refs {
-            Transact::WithEntity { e, sub } => sub.compile_rec(store, e),
+        match resolved {
+            Transact::Add { e, add } => add.compile(store, e),
+            Transact::RetractValue { e, a, v } => {
+                let a = store.get_attribute_id(&a)?;
+                Ok(vec![Update {
+                    add: false,
+                    e: e.to_entity()?,
+                    a,
+                    v: v.to_value()?,
+                }])
+            }
+            Transact::RetractAttribute { e, a } => {
+                let a = store.get_attribute_id(&a)?;
+                Ok(store
+                    .iter_entity_attribute(e.to_entity()?, a)
+                    .map(|eav| Update {
+                        add: false,
+                        e: eav.e,
+                        a: eav.a,
+                        v: eav.v,
+                    })
+                    .collect())
+            }
+            Transact::Retract { e } => {
+                // TODO: Retract components
+                // TODO: Retract links to entity (need vae index for this)
+                Ok(store
+                    .iter_entity(e.to_entity()?)
+                    .map(|eav| Update {
+                        add: false,
+                        e: eav.e,
+                        a: eav.a,
+                        v: eav.v,
+                    })
+                    .collect())
+            }
             Transact::List(subs) => {
                 let nested = subs
                     .into_iter()
@@ -104,16 +166,49 @@ impl Transact {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(nested.into_iter().flatten().collect())
             }
-            _ => Err(format!(
-                "Expected `WithEntity` or `List`, got {without_refs:?}"
-            )),
         }
     }
 
-    fn compile_rec(self, store: &mut Store, e: Entity) -> Result<Vec<Update>> {
+    fn resolve_temprefs(self, store: &mut Store) -> Self {
+        let mut mapping: HashMap<String, crate::Entity> = HashMap::new();
+        self.resolve_temprefs_rec(store, &mut mapping)
+    }
+
+    fn resolve_temprefs_rec(
+        self,
+        store: &mut Store,
+        mapping: &mut HashMap<String, crate::Entity>,
+    ) -> Self {
         match self {
-            Transact::WithEntity { e, sub } => sub.compile_rec(store, e),
-            Transact::AddValue { a, v } => {
+            Transact::Add { e, add } => Transact::Add {
+                e: e.resolve_tempref(mapping, store),
+                add: add.resolve_temprefs(store, mapping),
+            },
+            Transact::RetractValue { e, a, v } => Transact::RetractValue {
+                e: e.resolve_tempref(mapping, store),
+                a,
+                v: v.resolve_tempref(mapping, store),
+            },
+            Transact::RetractAttribute { e, a } => Transact::RetractAttribute {
+                e: e.resolve_tempref(mapping, store),
+                a,
+            },
+            Transact::Retract { e } => Transact::Retract {
+                e: e.resolve_tempref(mapping, store),
+            },
+            Transact::List(subs) => Transact::List(
+                subs.into_iter()
+                    .map(|sub| sub.resolve_temprefs_rec(store, mapping))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl Add {
+    fn compile(self, store: &mut Store, e: Entity) -> Result<Vec<Update>> {
+        match self {
+            Add::Value { a, v } => {
                 let e = e.to_entity()?;
                 let a = store.get_attribute_id(&a)?;
                 let v = v.to_value()?;
@@ -133,7 +228,7 @@ impl Transact {
 
                 Ok(result)
             }
-            Transact::AddComponent { a, sub } => {
+            Add::Component { a, sub } => {
                 let e = e.to_entity()?;
                 let a = store.get_attribute_id(&a)?;
                 // Don't want to create id here yet, just checking type:
@@ -148,7 +243,10 @@ impl Transact {
                             _ => Err(format!("Expected Ref value; found {}", eav.v)),
                         }?;
                         result.append(
-                            &mut Transact::Retract.compile_rec(store, Entity::Entity(comp_e))?,
+                            &mut Transact::Retract {
+                                e: Entity::Entity(comp_e),
+                            }
+                            .compile(store)?,
                         );
                         result.push(Update {
                             add: false,
@@ -166,95 +264,36 @@ impl Transact {
                     a,
                     v: crate::Value::Ref(new_e.0),
                 });
-                result.append(&mut sub.compile_rec(store, Entity::Entity(new_e))?);
+                result.append(&mut sub.compile(store, Entity::Entity(new_e))?);
                 Ok(result)
             }
-            Transact::RetractValue { a, v } => {
-                let a = store.get_attribute_id(&a)?;
-                Ok(vec![Update {
-                    add: false,
-                    e: e.to_entity()?,
-                    a,
-                    v: v.to_value()?,
-                }])
-            }
-            Transact::RetractAttribute { a } => {
-                let a = store.get_attribute_id(&a)?;
-                Ok(store
-                    .iter_entity_attribute(e.to_entity()?, a)
-                    .map(|eav| Update {
-                        add: false,
-                        e: eav.e,
-                        a: eav.a,
-                        v: eav.v,
-                    })
-                    .collect())
-            }
-            Transact::Retract => {
-                // TODO: Retract components
-                // TODO: Retract links to entity (need vae index for this)
-                Ok(store
-                    .iter_entity(e.to_entity()?)
-                    .map(|eav| Update {
-                        add: false,
-                        e: eav.e,
-                        a: eav.a,
-                        v: eav.v,
-                    })
-                    .collect())
-            }
-            Transact::List(subs) => {
+            Add::List(subs) => {
                 let nested = subs
                     .into_iter()
-                    .map(|sub| sub.compile_rec(store, e.clone()))
+                    .map(|sub| sub.compile(store, e.clone()))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(nested.into_iter().flatten().collect())
             }
         }
     }
 
-    fn resolve_temprefs(self, store: &mut Store) -> Self {
-        let mut mapping: HashMap<String, crate::Entity> = HashMap::new();
-        self.resolve_temprefs_rec(store, &mut mapping)
-    }
-
-    fn resolve_temprefs_rec(
+    fn resolve_temprefs(
         self,
         store: &mut Store,
         mapping: &mut HashMap<String, crate::Entity>,
     ) -> Self {
-        let mut get_id = |tempref| {
-            mapping
-                .entry(tempref)
-                .or_insert_with(|| store.next_entity_id())
-                .clone()
-        };
-
         match self {
-            Transact::WithEntity { e, sub } => Transact::WithEntity {
-                e: match e {
-                    Entity::TempRef(tempref) => Entity::Entity(get_id(tempref)),
-                    Entity::Entity(e) => Entity::Entity(e),
-                },
-                sub: Box::new(sub.resolve_temprefs_rec(store, mapping)),
-            },
-            Transact::AddValue { a, v } => Transact::AddValue {
+            Add::Value { a, v } => Add::Value {
                 a,
-                v: match v {
-                    Value::TempRef(tempref) => Value::Value(crate::Value::Ref(get_id(tempref).0)),
-                    _ => v,
-                },
+                v: v.resolve_tempref(mapping, store),
             },
-            Transact::AddComponent { a, sub } => Transact::AddComponent {
+            Add::Component { a, sub } => Add::Component {
                 a,
-                sub: Box::new(sub.resolve_temprefs_rec(store, mapping)),
+                sub: Box::new(sub.resolve_temprefs(store, mapping)),
             },
-            Transact::RetractValue { a, v } => Transact::RetractValue { a, v },
-            Transact::RetractAttribute { a } => Transact::RetractAttribute { a },
-            Transact::Retract => Transact::Retract,
-            Transact::List(subs) => Transact::List(
+            Add::List(subs) => Add::List(
                 subs.into_iter()
-                    .map(|sub| sub.resolve_temprefs_rec(store, mapping))
+                    .map(|sub| sub.resolve_temprefs(store, mapping))
                     .collect(),
             ),
         }
@@ -273,28 +312,28 @@ pub struct Update {
 mod test {
     use pretty_assertions::assert_eq;
 
-    use crate::{movies::DATA, Attribute};
+    use crate::{movies::DATA, transact::Add};
 
-    use super::{Entity, Tmp, Transact, Update};
+    use super::{Tmp, Transact, Update};
 
     #[test]
     fn compile_add_component() {
-        let tx = Transact::WithEntity {
+        let tx = Transact::List(vec![Transact::Add {
             e: Tmp("a").into(),
-            sub: Box::new(Transact::List(vec![
-                Transact::AddValue {
-                    a: Attribute("age".to_string()),
+            add: Add::List(vec![
+                Add::Value {
+                    a: "age".into(),
                     v: 40.into(),
                 },
-                Transact::AddComponent {
-                    a: Attribute("friend".to_string()),
-                    sub: Box::new(Transact::AddValue {
-                        a: Attribute("name".to_string()),
+                Add::Component {
+                    a: "friend".into(),
+                    sub: Box::new(Add::Value {
+                        a: "name".into(),
                         v: "Piet".into(),
                     }),
                 },
-            ])),
-        };
+            ]),
+        }]);
 
         let mut store = DATA.clone();
 
@@ -325,10 +364,7 @@ mod test {
 
     #[test]
     fn compile_retract() {
-        let tx = Transact::WithEntity {
-            e: Entity::Entity(crate::Entity(100)),
-            sub: Box::new(Transact::Retract),
-        };
+        let tx = Transact::Retract { e: 100.into() };
 
         let mut store = DATA.clone();
 
@@ -353,12 +389,12 @@ mod test {
 
     #[test]
     fn compile_upsert() {
-        let tx = Transact::WithEntity {
-            e: Entity::Entity(crate::Entity(100)),
-            sub: Box::new(Transact::AddValue {
-                a: Attribute("age".to_string()),
+        let tx = Transact::Add {
+            e: 100.into(),
+            add: Add::Value {
+                a: "age".into(),
                 v: 40.into(),
-            }),
+            },
         };
 
         let mut store = DATA.clone();
