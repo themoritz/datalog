@@ -7,15 +7,14 @@
 - [x] Pull API (and convert into Rust types)
   - [x] Pull Query Macro
 - [ ] Cache queries
-- [ ] Upserts
 - [x] Schema
   - [ ] Component attributes
 - [x] Enforce types
 - [x] Attributes are entities under the hood
 - [ ] Custom rust predicates
 - [ ] Aggregation functions
-- [ ] Enforce cardinality
-- [ ] Transactions
+- [x] Enforce cardinality
+- [x] Transactions
 - [ ] Transaction timestamps
 - [x] Introspection (builtins)
 

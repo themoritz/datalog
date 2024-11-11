@@ -207,6 +207,8 @@ macro_rules! row {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use store::{Cardinality, Store, Type};
+    use transact::Tmp;
 
     use super::*;
 
@@ -221,5 +223,42 @@ mod tests {
                 v: Value::Str("M".to_string()),
             }
         )
+    }
+
+    #[test]
+    fn integration() -> Result<()> {
+        let mut store = Store::new();
+
+        store.add_attribute("name", Type::Str, Cardinality::One, "The name")?;
+        store.add_attribute("age", Type::Int, Cardinality::One, "Age")?;
+        store.add_attribute("friend", Type::Ref, Cardinality::Many, "Friend")?;
+
+        let tx = add!(Tmp("1"), {
+            "name": "Moritz",
+            "friend": {
+                "name": "Piet"
+            }
+        });
+
+        store.transact(tx)?;
+
+        let q = query! {
+            find: [?name],
+            where: [
+                (?p, "name" = ?name)
+            ]
+        };
+
+        assert_eq!(q.qeval(&store)?, table![["Piet"], ["Moritz"]]);
+
+        //
+
+        let tx = retract!(14);
+
+        store.transact(tx)?;
+
+        assert_eq!(q.qeval(&store)?, table![["Piet"]]);
+
+        Ok(())
     }
 }

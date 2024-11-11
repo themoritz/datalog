@@ -5,7 +5,7 @@ use crate::{
     Attribute, Result,
 };
 
-struct Tmp<'a>(&'a str);
+pub struct Tmp<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entity {
@@ -120,7 +120,7 @@ impl Transact {
         Transact::List(vec![self, other])
     }
 
-    fn compile(self, store: &mut Store) -> Result<Vec<Update>> {
+    pub fn compile(self, store: &mut Store) -> Result<Vec<Update>> {
         let resolved = self.resolve_temprefs(store);
 
         match resolved {
@@ -302,10 +302,10 @@ impl Add {
 
 #[derive(Debug, PartialEq)]
 pub struct Update {
-    add: bool,
-    e: crate::Entity,
-    a: crate::Entity,
-    v: crate::Value,
+    pub add: bool,
+    pub e: crate::Entity,
+    pub a: crate::Entity,
+    pub v: crate::Value,
 }
 
 #[macro_export]
@@ -319,14 +319,14 @@ macro_rules! retract {
     ($e:expr, $a:expr) => {
         $crate::transact::Transact::RetractAttribute {
             e: $crate::transact::Entity::from($e),
-            a: $crate::transact::Attribute::from($a),
+            a: $crate::Attribute::from($a),
         }
     };
 
     ($e:expr, $a:tt: $v:expr) => {
         $crate::transact::Transact::RetractValue {
             e: $crate::transact::Entity::from($e),
-            a: $crate::transact::Attribute::from($a),
+            a: $crate::Attribute::from($a),
             v: $crate::transact::Value::from($v),
         }
     };
@@ -347,13 +347,13 @@ macro_rules! add {
     // VALUE
 
     (@value ($a:tt) ($v:expr)) => {
-        $crate::transact::Add::Value { a: $crate::transact::Attribute::from($a), v: $crate::transact::Value::from($v) }
+        $crate::transact::Add::Value { a: $crate::Attribute::from($a), v: $crate::transact::Value::from($v) }
     };
 
     // COMPONENT
 
     (@component ($a:tt) ($sub:expr)) => {
-        $crate::transact::Add::Component { a: $crate::transact::Attribute::from($a), sub: Box::new($sub) }
+        $crate::transact::Add::Component { a: $crate::Attribute::from($a), sub: Box::new($sub) }
     };
 
     // MULTIPLE ATTRIBUTES
@@ -384,10 +384,10 @@ macro_rules! add {
     (@list ($a:tt) [$($values:expr),*] [$($components:expr),*]) => {{
         let mut result: Vec<$crate::transact::Add> = vec![];
         for v in vec![$($values,)*].into_iter() {
-            result.push($crate::transact::Add::Value { a: $crate::transact::Attribute::from($a), v });
+            result.push($crate::transact::Add::Value { a: $crate::Attribute::from($a), v });
         }
         for c in vec![$($components,)*].into_iter() {
-            result.push($crate::transact::Add::Component { a: $crate::transact::Attribute::from($a), sub: Box::new(c) });
+            result.push($crate::transact::Add::Component { a: $crate::Attribute::from($a), sub: Box::new(c) });
         }
         $crate::transact::Add::List(result)
     }};

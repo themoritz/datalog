@@ -1,9 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    persist::Backend,
-    query::{Entry, Pattern, Where},
-    Attribute, Datom, Entity, Result, Value,
+    persist::Backend, query::{Entry, Pattern, Where}, transact::Transact, Attribute, Datom, Entity, Result, Value
 };
 
 #[derive(Clone, Debug, Copy, serde::Serialize)]
@@ -443,6 +441,19 @@ impl Store {
         };
 
         Ok(s)
+    }
+
+    // TODO: Return tempref mapping?
+    pub fn transact(&mut self, tx: Transact) -> Result<()> {
+        let updates = tx.compile(self)?;
+        for u in updates {
+            if u.add {
+                self.insert_raw(u.e, u.a, u.v);
+            } else {
+                self.retract_raw(u.e, u.a, u.v);
+            }
+        }
+        Ok(())
     }
 }
 

@@ -3,11 +3,12 @@ use std::{collections::HashSet, hint::black_box};
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use datalog::{
-    movies::STORE,
+    add,
+    movies::{DATA, STORE},
     pull,
     pull::PullValue,
     query,
-    query::{Entry, Pattern, Query, Var, Where},
+    transact::Tmp,
     Attribute, Value,
 };
 
@@ -40,11 +41,27 @@ fn run_pull(e: u64) -> PullValue {
     api.pull(&Value::Ref(e), &STORE).unwrap()
 }
 
+fn run_tx(e: &str) {
+    let mut store = (*DATA).clone();
+
+    let tx = add!(Tmp(e), {
+        "name": "Tom",
+        "age": 5,
+        "friend": {
+            "name": "Sofie",
+            "age": 7
+        }
+    });
+
+    store.transact(tx).unwrap();
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("arnold", |b| {
         b.iter(|| run_query(black_box("Arnold Schwarzenegger")))
     });
     c.bench_function("pull", |b| b.iter(|| run_pull(black_box(202))));
+    c.bench_function("transact", |b| b.iter(|| run_tx(black_box("a"))));
 }
 
 criterion_group!(benches, criterion_benchmark);
