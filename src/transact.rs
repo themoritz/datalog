@@ -437,23 +437,56 @@ mod test {
     }
 
     #[test]
+    fn macro_add_component() {
+        let tx = add!(1, {
+            "friend": [{
+                "age": 39
+            }]
+        });
+
+        assert_eq!(
+            tx,
+            Transact::Add {
+                e: Entity::Entity(crate::Entity(1,)),
+                add: Add::List(vec![Add::List(vec![Add::Component {
+                    a: crate::Attribute("friend".to_string()),
+                    sub: Box::new(Add::List(vec![Add::Value {
+                        a: crate::Attribute("age".to_string()),
+                        v: Value::Value(crate::Value::Int(39)),
+                    }]))
+                }])])
+            }
+        );
+    }
+
+    #[test]
+    fn macro_retract() {
+        let tx = retract!(Tmp("a"));
+        assert_eq!(
+            tx,
+            Transact::Retract {
+                e: Entity::TempRef("a".to_string())
+            }
+        );
+
+        let tx = retract!(14, "name");
+        assert_eq!(
+            tx,
+            Transact::RetractAttribute {
+                e: Entity::Entity(crate::Entity(14)),
+                a: Attribute("name".to_string())
+            }
+        );
+    }
+
+    #[test]
     fn compile_add_component() {
-        let tx = Transact::List(vec![Transact::Add {
-            e: Tmp("a").into(),
-            add: Add::List(vec![
-                Add::Value {
-                    a: "age".into(),
-                    v: 40.into(),
-                },
-                Add::Component {
-                    a: "friend".into(),
-                    sub: Box::new(Add::Value {
-                        a: "name".into(),
-                        v: "Piet".into(),
-                    }),
-                },
-            ]),
-        }]);
+        let tx = add!(Tmp("a"), {
+            "age": 40,
+            "friend": {
+                "name": "Piet"
+            }
+        });
 
         let mut store = DATA.clone();
 
@@ -484,7 +517,7 @@ mod test {
 
     #[test]
     fn compile_retract() {
-        let tx = Transact::Retract { e: 100.into() };
+        let tx = retract!(100);
 
         let mut store = DATA.clone();
 
@@ -509,13 +542,7 @@ mod test {
 
     #[test]
     fn compile_upsert() {
-        let tx = Transact::Add {
-            e: 100.into(),
-            add: Add::Value {
-                a: "age".into(),
-                v: 40.into(),
-            },
-        };
+        let tx = add!(100, "age": 40);
 
         let mut store = DATA.clone();
 
