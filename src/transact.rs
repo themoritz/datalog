@@ -7,7 +7,7 @@ use crate::{
 
 struct Tmp<'a>(&'a str);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Entity {
     Entity(crate::Entity),
     TempRef(String),
@@ -52,7 +52,7 @@ impl<'a> From<Tmp<'a>> for Entity {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Value {
     Value(crate::Value),
     TempRef(String),
@@ -99,7 +99,7 @@ impl Value {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Transact {
     Add { e: Entity, add: Add },
     RetractValue { e: Entity, a: Attribute, v: Value },
@@ -108,7 +108,7 @@ pub enum Transact {
     List(Vec<Transact>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Add {
     Value { a: Attribute, v: Value },
     Component { a: Attribute, sub: Box<Add> },
@@ -308,13 +308,133 @@ pub struct Update {
     v: crate::Value,
 }
 
+#[macro_export]
+macro_rules! retract {
+    ($e:expr) => {
+        $crate::transact::Transact::Retract {
+            e: $crate::transact::Entity::from($e),
+        }
+    };
+
+    ($e:expr, $a:expr) => {
+        $crate::transact::Transact::RetractAttribute {
+            e: $crate::transact::Entity::from($e),
+            a: $crate::transact::Attribute::from($a),
+        }
+    };
+
+    ($e:expr, $a:tt: $v:expr) => {
+        $crate::transact::Transact::RetractValue {
+            e: $crate::transact::Entity::from($e),
+            a: $crate::transact::Attribute::from($a),
+            v: $crate::transact::Value::from($v),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! add {
+    // Entry value
+    ($e:expr, $a:tt: $v:expr) => {
+        $crate::transact::Transact::Add { e: $crate::transact::Entity::from($e), add: add!(@value ($a) ($v)) }
+    };
+
+    // Entry component
+    ($e:expr, {$($tt:tt)*}) => {
+        $crate::transact::Transact::Add { e: $crate::transact::Entity::from($e), add: add!(@multi [] $($tt)*) }
+    };
+
+    // VALUE
+
+    (@value ($a:tt) ($v:expr)) => {
+        $crate::transact::Add::Value { a: $crate::transact::Attribute::from($a), v: $crate::transact::Value::from($v) }
+    };
+
+    // COMPONENT
+
+    (@component ($a:tt) ($sub:expr)) => {
+        $crate::transact::Add::Component { a: $crate::transact::Attribute::from($a), sub: Box::new($sub) }
+    };
+
+    // MULTIPLE ATTRIBUTES
+
+    // Done
+    (@multi [$($elems:expr),*]) => {
+        $crate::transact::Add::List(vec![$($elems,)*])
+    };
+
+    // Component
+    (@multi [$($elems:expr),*] $a:tt: {$($tt:tt)*} $(, $($rest:tt)*)?) => {
+        add!(@multi [$($elems,)* add!(@component ($a) (add!(@multi [] $($tt)*)))] $($($rest)*)?)
+    };
+
+    // List
+    (@multi [$($elems:expr),*] $a:tt: [$($tt:tt)*] $(, $($rest:tt)*)?) => {
+        add!(@multi [$($elems,)* add!(@list ($a) [] [] $($tt)*)] $($($rest)*)?)
+    };
+
+    // Value
+    (@multi [$($elems:expr),*] $a:tt: $v:expr $(, $($rest:tt)*)?) => {
+        add!(@multi [$($elems,)* add!(@value ($a) ($v))] $($($rest)*)?)
+    };
+
+    // LIST
+
+    // Done
+    (@list ($a:tt) [$($values:expr),*] [$($components:expr),*]) => {{
+        let mut result: Vec<$crate::transact::Add> = vec![];
+        for v in vec![$($values,)*].into_iter() {
+            result.push($crate::transact::Add::Value { a: $crate::transact::Attribute::from($a), v });
+        }
+        for c in vec![$($components,)*].into_iter() {
+            result.push($crate::transact::Add::Component { a: $crate::transact::Attribute::from($a), sub: Box::new(c) });
+        }
+        $crate::transact::Add::List(result)
+    }};
+
+    // Component
+    (@list ($a:tt) [$($values:expr),*] [$($components:expr),*] {$($tt:tt)*} $(, $($rest:tt)*)?) => {
+        add!(@list ($a) [$($values,)*] [$($components),* add!(@multi [] $($tt)*)] $($($rest)*)?)
+    };
+
+    // Value
+    (@list ($a:tt) [$($values:expr),*] [$($components:expr),*] $v:expr $(, $($rest:tt)*)?) => {
+        add!(@list ($a) [$($values,)* $crate::transact::Value::from($v)] [$($components),*] $($($rest)*)?)
+    };
+}
+
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
 
-    use crate::{movies::DATA, transact::Add};
+    use crate::{movies::DATA, Attribute};
 
-    use super::{Tmp, Transact, Update};
+    use super::{Add, Entity, Tmp, Transact, Update, Value};
+
+    #[test]
+    fn macro_add() {
+        let tx = add!(Tmp("a"), {
+           "name": "Moritz",
+           "age": 39
+        });
+
+        assert_eq!(
+            tx,
+            Transact::Add {
+                e: Entity::TempRef("a".to_string()),
+                add: Add::List(vec![
+                    Add::Value {
+                        a: Attribute("name".to_string(),),
+                        v: Value::Value(crate::Value::Str("Moritz".to_string(),),),
+                    },
+                    Add::Value {
+                        a: Attribute("age".to_string(),),
+                        v: Value::Value(crate::Value::Int(39,),),
+                    },
+                ],),
+            }
+        );
+    }
 
     #[test]
     fn compile_add_component() {
