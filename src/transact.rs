@@ -7,6 +7,8 @@ use crate::{
 
 pub struct Tmp<'a>(pub &'a str);
 
+pub type IdMapping = HashMap<String, crate::Entity>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entity {
     Entity(crate::Entity),
@@ -120,10 +122,13 @@ impl Transact {
         Transact::List(vec![self, other])
     }
 
-    pub fn compile(self, store: &mut Store) -> Result<Vec<Update>> {
-        let resolved = self.resolve_temprefs(store);
+    pub fn compile(self, store: &mut Store) -> Result<(Vec<Update>, IdMapping)> {
+        let (resolved, mapping) = self.resolve_temprefs(store);
+        Ok((resolved.compile_rec(store)?, mapping))
+    }
 
-        match resolved {
+    fn compile_rec(self, store: &mut Store) -> Result<Vec<Update>> {
+        match self {
             Transact::Add { e, add } => add.compile(store, e),
             Transact::RetractValue { e, a, v } => {
                 let a = store.get_attribute_id(&a)?;
@@ -162,16 +167,16 @@ impl Transact {
             Transact::List(subs) => {
                 let nested = subs
                     .into_iter()
-                    .map(|sub| sub.compile(store))
+                    .map(|sub| sub.compile_rec(store))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(nested.into_iter().flatten().collect())
             }
         }
     }
 
-    fn resolve_temprefs(self, store: &mut Store) -> Self {
-        let mut mapping: HashMap<String, crate::Entity> = HashMap::new();
-        self.resolve_temprefs_rec(store, &mut mapping)
+    fn resolve_temprefs(self, store: &mut Store) -> (Self, IdMapping) {
+        let mut mapping: IdMapping = HashMap::new();
+        (self.resolve_temprefs_rec(store, &mut mapping), mapping)
     }
 
     fn resolve_temprefs_rec(
@@ -246,7 +251,7 @@ impl Add {
                             &mut Transact::Retract {
                                 e: Entity::Entity(comp_e),
                             }
-                            .compile(store)?,
+                            .compile_rec(store)?,
                         );
                         result.push(Update {
                             add: false,
@@ -334,6 +339,11 @@ macro_rules! retract {
 
 #[macro_export]
 macro_rules! add {
+    // Entry with default `x` tempref
+    ({$($tt:tt)*}) => {
+        $crate::transact::Transact::Add { e: $crate::transact::Entity::TempRef("x".to_string()), add: add!(@multi [] $($tt)*) }
+    };
+
     // Entry value
     ($e:expr, $a:tt: $v:expr) => {
         $crate::transact::Transact::Add { e: $crate::transact::Entity::from($e), add: add!(@value ($a) ($v)) }
@@ -460,6 +470,18 @@ mod test {
     }
 
     #[test]
+    fn macro_add_x() {
+        let tx = add!({
+            "name": "Moritz"
+        });
+
+        let mut store = DATA.clone();
+
+        let (_, mapping) = tx.compile(&mut store).unwrap();
+        assert_eq!(mapping["x"], crate::Entity(201));
+    }
+
+    #[test]
     fn macro_retract() {
         let tx = retract!(Tmp("a"));
         assert_eq!(
@@ -491,7 +513,7 @@ mod test {
         let mut store = DATA.clone();
 
         assert_eq!(
-            tx.compile(&mut store).unwrap(),
+            tx.compile(&mut store).unwrap().0,
             vec![
                 Update {
                     add: true,
@@ -522,7 +544,7 @@ mod test {
         let mut store = DATA.clone();
 
         assert_eq!(
-            tx.compile(&mut store).unwrap(),
+            tx.compile(&mut store).unwrap().0,
             vec![
                 Update {
                     add: false,
@@ -547,7 +569,7 @@ mod test {
         let mut store = DATA.clone();
 
         assert_eq!(
-            tx.compile(&mut store).unwrap(),
+            tx.compile(&mut store).unwrap().0,
             vec![
                 Update {
                     add: false,
