@@ -116,19 +116,31 @@ impl Builtins {
 
 pub trait Store {
     fn naked() -> Self;
-    fn new() -> Self;
+    // fn new() -> Self;
     fn builtins(&self) -> &Builtins;
     fn set_builtins(&mut self, builtins: Builtins);
     fn set_next_id(&mut self, next_id: Entity);
     fn next_entity_id(&mut self) -> Entity;
     fn insert_raw(&mut self, e: Entity, a: Entity, v: impl Clone + Into<Value>);
     fn retract_raw(&mut self, e: Entity, a: Entity, v: Value);
-    fn iter(&self) -> impl Iterator<Item = &EAV> + '_;
+    fn iter(&self) -> impl Iterator<Item = EAV> + '_;
     fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_;
     fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_;
     fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_;
 
     /// PROVIDED:
+
+    fn new() -> Self
+    where
+        Self: Sized,
+    {
+        let mut s = Self::naked();
+
+        let builtins = Builtins::build(&mut s);
+        s.set_builtins(builtins);
+
+        s
+    }
 
     fn add_attribute(
         &mut self,
@@ -427,14 +439,6 @@ impl Store for MemStore {
         }
     }
 
-    fn new() -> Self {
-        let mut s = Self::naked();
-
-        s.builtins = Builtins::build(&mut s);
-
-        s
-    }
-
     fn builtins(&self) -> &Builtins {
         &self.builtins
     }
@@ -468,8 +472,8 @@ impl Store for MemStore {
         self.ave.remove(&AVE { a, v, e });
     }
 
-    fn iter(&self) -> impl Iterator<Item = &EAV> + '_ {
-        self.eav.iter()
+    fn iter(&self) -> impl Iterator<Item = EAV> + '_ {
+        self.eav.clone().into_iter()
     }
 
     fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_ {

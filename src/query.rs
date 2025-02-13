@@ -96,8 +96,9 @@ impl Where<Entity> {
     }
 }
 
+// TODO: Differentiation not needed
 enum Candidates<'a> {
-    Lazy(Box<dyn Iterator<Item = &'a EAV> + 'a>),
+    Lazy(Box<dyn Iterator<Item = EAV> + 'a>),
     Strict(Box<dyn Iterator<Item = EAV> + 'a>),
 }
 
@@ -151,7 +152,7 @@ impl<'a, I: Iterator<Item = Frame>, S: Store> Iterator for PatternI<'a, I, S> {
         match self.current_frame {
             Some(ref frame) => match self.candidates {
                 Candidates::Lazy(ref mut i) => match i.next() {
-                    Some(datom) => self.match_(frame.clone(), datom),
+                    Some(datom) => self.match_(frame.clone(), &datom),
                     None => self.next_frame(),
                 },
                 Candidates::Strict(ref mut i) => match i.next() {

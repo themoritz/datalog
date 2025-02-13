@@ -11,6 +11,7 @@ use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 pub mod movies;
 
 pub mod persist;
+pub mod pg_store;
 pub mod pull;
 pub mod query;
 pub mod store;

@@ -3,7 +3,7 @@ use serde::Deserialize;
 use crate::{store::EAV, Entity, Result, Value};
 
 pub trait Backend: Sized {
-    fn save<'a>(&mut self, data: impl Iterator<Item = &'a EAV>) -> Result<Self>;
+    fn save(&mut self, data: impl Iterator<Item = EAV>) -> Result<Self>;
     fn load(&mut self) -> Result<impl Iterator<Item = EAV>>;
 }
 
@@ -21,7 +21,7 @@ impl Json {
 }
 
 impl Backend for Json {
-    fn save<'a>(&mut self, data: impl Iterator<Item = &'a EAV>) -> Result<Self> {
+    fn save(&mut self, data: impl Iterator<Item = EAV>) -> Result<Self> {
         let mut entries = vec![];
 
         for eav in data {
