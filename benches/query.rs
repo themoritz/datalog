@@ -8,6 +8,7 @@ use datalog::{
     pull,
     pull::PullValue,
     query,
+    store::{MemStore, Store},
     transact::Tmp,
     Attribute, Value,
 };
@@ -24,7 +25,8 @@ fn run_query(name: &str) -> HashSet<Vec<Value>> {
         ]
     };
 
-    q.qeval(&STORE).unwrap()
+    let store: &MemStore = &STORE;
+    q.qeval(store).unwrap()
 }
 
 fn run_pull(e: u64) -> PullValue {
@@ -38,11 +40,12 @@ fn run_pull(e: u64) -> PullValue {
         }
     });
 
-    api.pull(&Value::Ref(e), &STORE).unwrap()
+    let store: &MemStore = &STORE;
+    api.pull(&Value::Ref(e), store).unwrap()
 }
 
 fn run_tx(e: &str) {
-    let mut store = (*DATA).clone();
+    let mut store: MemStore = (*DATA).clone();
 
     let tx = add!(Tmp(e), {
         "name": "Tom",

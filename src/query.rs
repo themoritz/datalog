@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    store::{Store, EAV},
+    store::{MemStore, Store, EAV},
     Attribute, Data, Datom, Entity, Result, Value,
 };
 
@@ -24,13 +24,13 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn qeval(&self, store: &Store) -> Result<HashSet<Vec<Value>>> {
+    pub fn qeval(&self, store: &impl Store) -> Result<HashSet<Vec<Value>>> {
         let resolved_where = store.resolve_where(&self.where_)?;
         let frame_iter = resolved_where.qeval(store, vec![Frame::new()].into_iter());
         frame_iter.map(|frame| frame.row(&self.find)).collect()
     }
 
-    fn print_result(&self, store: &Store) {
+    fn print_result(&self, store: &MemStore) {
         match self.qeval(store) {
             Ok(table) => {
                 for var in &self.find {
@@ -71,9 +71,9 @@ impl<T> Where<T> {
 }
 
 impl Where<Entity> {
-    fn qeval<'a>(
+    fn qeval<'a, S: Store>(
         &'a self,
-        store: &'a Store,
+        store: &'a S,
         frames: impl Iterator<Item = Frame> + 'a,
     ) -> Box<dyn Iterator<Item = Frame> + 'a> {
         match self {
@@ -101,15 +101,15 @@ enum Candidates<'a> {
     Strict(Box<dyn Iterator<Item = EAV> + 'a>),
 }
 
-struct PatternI<'a, I> {
+struct PatternI<'a, I, S> {
     pattern: &'a Pattern<Entity>,
     frames: I,
     current_frame: Option<Frame>,
-    store: &'a Store,
+    store: &'a S,
     candidates: Candidates<'a>,
 }
 
-impl<'a, I: Iterator<Item = Frame>> PatternI<'a, I> {
+impl<'a, I: Iterator<Item = Frame>, S: Store> PatternI<'a, I, S> {
     fn match_(&mut self, mut frame: Frame, datom: &EAV) -> Option<Frame> {
         if let Ok(()) = self.pattern.match_(&mut frame, datom) {
             Some(frame)
@@ -143,7 +143,7 @@ impl<'a, I: Iterator<Item = Frame>> PatternI<'a, I> {
     }
 }
 
-impl<'a, I: Iterator<Item = Frame>> Iterator for PatternI<'a, I> {
+impl<'a, I: Iterator<Item = Frame>, S: Store> Iterator for PatternI<'a, I, S> {
     type Item = Frame;
 
     // TODO: Avoid recursion
@@ -164,15 +164,15 @@ impl<'a, I: Iterator<Item = Frame>> Iterator for PatternI<'a, I> {
     }
 }
 
-struct OrI<'a, I> {
+struct OrI<'a, I, S> {
     inner: I,
-    store: &'a Store,
+    store: &'a S,
     left: &'a Box<Where<Entity>>,
     right: &'a Box<Where<Entity>>,
     queue: VecDeque<Frame>,
 }
 
-impl<'a, I: Iterator<Item = Frame>> Iterator for OrI<'a, I> {
+impl<'a, I: Iterator<Item = Frame>, S: Store> Iterator for OrI<'a, I, S> {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -554,7 +554,8 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![[Ref(100), "Moritz"]]);
+        let data: &MemStore = &DATA;
+        assert_eq!(q.qeval(data).unwrap(), table![[Ref(100), "Moritz"]]);
     }
 
     #[test]
@@ -570,7 +571,8 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![[Ref(200)], [Ref(100)]]);
+        let data: &MemStore = &DATA;
+        assert_eq!(q.qeval(data).unwrap(), table![[Ref(200)], [Ref(100)]]);
     }
 
     #[test]
@@ -583,7 +585,8 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![["The name"]]);
+        let data: &MemStore = &DATA;
+        assert_eq!(q.qeval(data).unwrap(), table![["The name"]]);
 
         let q = query! {
             find: [?e],
@@ -592,7 +595,8 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&DATA).unwrap(), table![[Ref(0)]]);
+        let data: &MemStore = &DATA;
+        assert_eq!(q.qeval(data).unwrap(), table![[Ref(0)]]);
     }
 
     #[test]
@@ -605,7 +609,8 @@ mod tests {
             ]
         };
 
-        assert_eq!(q.qeval(&STORE).unwrap(), table![[1979]]);
+        let store: &MemStore = &STORE;
+        assert_eq!(q.qeval(store).unwrap(), table![[1979]]);
     }
 
     #[test]
@@ -617,8 +622,9 @@ mod tests {
             ]
         };
 
+        let store: &MemStore = &STORE;
         assert_eq!(
-            STORE.resolve_result(q.qeval(&STORE).unwrap()),
+            STORE.resolve_result(q.qeval(store).unwrap()),
             table![
                 ["movie/title", "The Terminator"],
                 ["movie/year", 1984],
@@ -644,7 +650,8 @@ mod tests {
             ]
         };
 
-        let result = q.qeval(&STORE).unwrap();
+        let store: &MemStore = &STORE;
+        let result = q.qeval(store).unwrap();
         assert_eq!(
             result,
             table![
@@ -667,8 +674,9 @@ mod tests {
             ]
         };
 
+        let store: &MemStore = &STORE;
         assert_eq!(
-            q.qeval(&STORE).unwrap(),
+            q.qeval(store).unwrap(),
             table![
                 ["Commando"],
                 ["Rambo: First Blood Part II"],
@@ -687,8 +695,9 @@ mod tests {
             ]
         };
 
+        let store: &MemStore = &STORE;
         assert_eq!(
-            STORE.resolve_result(q.qeval(&STORE).unwrap()),
+            STORE.resolve_result(q.qeval(store).unwrap()),
             table![
                 ["movie/director"],
                 ["movie/cast"],

@@ -19,7 +19,7 @@ pub enum Api {
 }
 
 impl Api {
-    pub fn pull(&self, start: &Value, store: &Store) -> Result<PullValue> {
+    pub fn pull(&self, start: &Value, store: &impl Store) -> Result<PullValue> {
         match self {
             Self::Return => Ok(PullValue::Lit(start.clone())),
             Self::List(list) => {
@@ -268,7 +268,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde::Deserialize;
 
-    use crate::{movies::STORE, pull::PullValue, Attribute, Value};
+    use crate::{movies::STORE, pull::PullValue, store::MemStore, Attribute, Value};
 
     use super::Api;
 
@@ -376,7 +376,8 @@ mod tests {
             ],
         };
 
-        let pull_value = api.pull(&Value::Ref(202), &STORE).unwrap();
+        let store: &MemStore = &STORE;
+        let pull_value = api.pull(&Value::Ref(202), store).unwrap();
         let actual: MovieWithCast = Deserialize::deserialize(&pull_value).unwrap();
         assert_eq!(actual, expected);
     }

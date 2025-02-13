@@ -207,8 +207,10 @@ macro_rules! row {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use store::{Cardinality, Store, Type};
+    use store::{Cardinality, MemStore, Type};
     use transact::Tmp;
+
+    use crate::store::Store;
 
     use super::*;
 
@@ -227,7 +229,7 @@ mod tests {
 
     #[test]
     fn integration() -> Result<()> {
-        let mut store = Store::new();
+        let mut store = MemStore::new();
 
         store.add_attribute("name", Type::Str, Cardinality::One, "The name")?;
         store.add_attribute("age", Type::Int, Cardinality::One, "Age")?;

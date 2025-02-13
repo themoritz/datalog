@@ -2,13 +2,13 @@ use lazy_static;
 
 use crate::{
     datom,
-    store::{Cardinality, Store, Type},
+    store::{Cardinality, MemStore, Store, Type},
     Ref,
 };
 
 lazy_static::lazy_static! {
-    pub static ref DATA: Store = {
-        let mut store = Store::new();
+    pub static ref DATA: MemStore = {
+        let mut store = MemStore::new();
 
         store
             .add_attribute("name", Type::Str, Cardinality::One, "The name")
@@ -36,7 +36,7 @@ lazy_static::lazy_static! {
         store
     };
 
-    pub static ref STORE: Store = {
+    pub static ref STORE: MemStore = {
         let datoms = vec![
             datom!(100, "person/name" = "James Cameron"),
             datom!(100, "person/born" = "1954-08-16T00:00:00Z"),
@@ -275,7 +275,7 @@ lazy_static::lazy_static! {
             datom!(219, "movie/cast" = Ref(149)),
         ];
 
-        let mut store = Store::new();
+        let mut store = MemStore::new();
 
         store.add_attribute("person/name", Type::Str, Cardinality::One, "").unwrap();
         store.add_attribute("person/born", Type::Str, Cardinality::One, "").unwrap();

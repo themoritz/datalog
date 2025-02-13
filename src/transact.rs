@@ -19,7 +19,7 @@ impl Entity {
     fn resolve_tempref(
         self,
         mapping: &mut HashMap<String, crate::Entity>,
-        store: &mut Store,
+        store: &mut impl Store,
     ) -> Self {
         match self {
             Entity::Entity(e) => Entity::Entity(e),
@@ -79,7 +79,7 @@ impl Value {
     fn resolve_tempref(
         self,
         mapping: &mut HashMap<String, crate::Entity>,
-        store: &mut Store,
+        store: &mut impl Store,
     ) -> Self {
         match self {
             Value::Value(v) => Value::Value(v),
@@ -122,12 +122,12 @@ impl Transact {
         Transact::List(vec![self, other])
     }
 
-    pub fn compile(self, store: &mut Store) -> Result<(Vec<Update>, IdMapping)> {
+    pub fn compile(self, store: &mut impl Store) -> Result<(Vec<Update>, IdMapping)> {
         let (resolved, mapping) = self.resolve_temprefs(store);
         Ok((resolved.compile_rec(store)?, mapping))
     }
 
-    fn compile_rec(self, store: &mut Store) -> Result<Vec<Update>> {
+    fn compile_rec(self, store: &mut impl Store) -> Result<Vec<Update>> {
         match self {
             Transact::Add { e, add } => add.compile(store, e),
             Transact::RetractValue { e, a, v } => {
@@ -174,14 +174,14 @@ impl Transact {
         }
     }
 
-    fn resolve_temprefs(self, store: &mut Store) -> (Self, IdMapping) {
+    fn resolve_temprefs(self, store: &mut impl Store) -> (Self, IdMapping) {
         let mut mapping: IdMapping = HashMap::new();
         (self.resolve_temprefs_rec(store, &mut mapping), mapping)
     }
 
     fn resolve_temprefs_rec(
         self,
-        store: &mut Store,
+        store: &mut impl Store,
         mapping: &mut HashMap<String, crate::Entity>,
     ) -> Self {
         match self {
@@ -211,7 +211,7 @@ impl Transact {
 }
 
 impl Add {
-    fn compile(self, store: &mut Store, e: Entity) -> Result<Vec<Update>> {
+    fn compile(self, store: &mut impl Store, e: Entity) -> Result<Vec<Update>> {
         match self {
             Add::Value { a, v } => {
                 let e = e.to_entity()?;
@@ -284,7 +284,7 @@ impl Add {
 
     fn resolve_temprefs(
         self,
-        store: &mut Store,
+        store: &mut impl Store,
         mapping: &mut HashMap<String, crate::Entity>,
     ) -> Self {
         match self {

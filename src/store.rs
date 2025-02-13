@@ -23,7 +23,7 @@ pub enum Cardinality {
 }
 
 #[derive(Default, PartialEq, Debug, Clone)]
-struct Builtins {
+pub struct Builtins {
     ident: Entity,
     type_: Entity,
     card: Entity,
@@ -54,34 +54,15 @@ impl Builtins {
             Cardinality::Many => self.many,
         }
     }
-}
 
-#[derive(PartialEq, Debug, Clone)]
-pub struct Store {
-    eav: BTreeSet<EAV>,
-    ave: BTreeSet<AVE>,
-    builtins: Builtins,
-    next_id: u64,
-    next_tx: u64,
-}
+    fn build<S: Store>(s: &mut S) -> Self {
+        let ident = Entity(0);
+        let type_ = Entity(1);
+        let card = Entity(2);
+        let doc = Entity(3);
 
-impl Store {
-    pub fn new() -> Self {
-        let mut s = Store {
-            eav: BTreeSet::new(),
-            ave: BTreeSet::new(),
-            builtins: Builtins::default(),
-            next_id: 0,
-            next_tx: 1,
-        };
-
-        let ident = s.next_entity_id();
-        let type_ = s.next_entity_id();
-        let card = s.next_entity_id();
-        let doc = s.next_entity_id();
-
-        let one = s.next_entity_id();
-        let many = s.next_entity_id();
+        let one = Entity(4);
+        let many = Entity(5);
 
         s.insert_raw(one, ident, "db.cardinality/one");
         s.insert_raw(many, ident, "db.cardinality/many");
@@ -117,7 +98,7 @@ impl Store {
         s.insert_raw(doc, card, one);
         s.insert_raw(doc, doc, "Documentation string for an attribute");
 
-        s.builtins = Builtins {
+        Builtins {
             ident,
             type_,
             card,
@@ -129,18 +110,27 @@ impl Store {
             int,
             float,
             bool,
-        };
-
-        s
+        }
     }
+}
 
-    pub fn next_entity_id(&mut self) -> Entity {
-        let result = Entity(self.next_id);
-        self.next_id += 1;
-        result
-    }
+pub trait Store {
+    fn naked() -> Self;
+    fn new() -> Self;
+    fn builtins(&self) -> &Builtins;
+    fn set_builtins(&mut self, builtins: Builtins);
+    fn set_next_id(&mut self, next_id: Entity);
+    fn next_entity_id(&mut self) -> Entity;
+    fn insert_raw(&mut self, e: Entity, a: Entity, v: impl Clone + Into<Value>);
+    fn retract_raw(&mut self, e: Entity, a: Entity, v: Value);
+    fn iter(&self) -> impl Iterator<Item = &EAV> + '_;
+    fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_;
+    fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_;
+    fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_;
 
-    pub fn add_attribute(
+    /// PROVIDED:
+
+    fn add_attribute(
         &mut self,
         name: &str,
         type_: Type,
@@ -153,41 +143,26 @@ impl Store {
 
         let e = self.next_entity_id();
 
-        self.insert_raw(e, self.builtins.ident, name);
-        self.insert_raw(e, self.builtins.type_, self.builtins.type_entity(type_));
+        self.insert_raw(e, self.builtins().ident, name);
+        self.insert_raw(e, self.builtins().type_, self.builtins().type_entity(type_));
         self.insert_raw(
             e,
-            self.builtins.card,
-            self.builtins.card_entity(cardinality),
+            self.builtins().card,
+            self.builtins().card_entity(cardinality),
         );
-        self.insert_raw(e, self.builtins.doc, doc);
+        self.insert_raw(e, self.builtins().doc, doc);
 
         Ok(())
     }
 
-    fn insert_raw(&mut self, e: Entity, a: Entity, v: impl Clone + Into<Value>) {
-        self.eav.insert(EAV {
-            e,
-            a,
-            v: v.clone().into(),
-        });
-        self.ave.insert(AVE { a, v: v.into(), e });
-        self.next_id = self.next_id.max(e.0 + 1);
-    }
-
-    fn retract_raw(&mut self, e: Entity, a: Entity, v: Value) {
-        self.eav.remove(&EAV { e, a, v: v.clone() });
-        self.ave.remove(&AVE { a, v, e });
-    }
-
-    pub fn insert(&mut self, datom: Datom) -> Result<()> {
+    fn insert(&mut self, datom: Datom) -> Result<()> {
         let a = self.get_attribute_id(&datom.a)?;
         self.check_attribute_type(a, &datom.v)?;
         self.insert_raw(datom.e, a, datom.v);
         Ok(())
     }
 
-    pub fn retract(&mut self, datom: Datom) -> Result<()> {
+    fn retract(&mut self, datom: Datom) -> Result<()> {
         let a = self.get_attribute_id(&datom.a)?;
 
         self.retract_raw(datom.e, a, datom.v);
@@ -195,59 +170,13 @@ impl Store {
         Ok(())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &EAV> + '_ {
-        self.eav.iter()
-    }
-
-    pub fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_ {
-        let min = EAV {
-            e,
-            a: Entity::min(),
-            v: Value::min(),
-        };
-        let max = EAV {
-            e: e.next(),
-            a: Entity::min(),
-            v: Value::min(),
-        };
-        self.eav.range(min..max).map(|eav| eav.clone().into())
-    }
-
-    pub fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_ {
-        let min = EAV {
-            e,
-            a: a.clone(),
-            v: Value::min(),
-        };
-        let max = EAV {
-            e,
-            a: a.next(),
-            v: Value::min(),
-        };
-        self.eav.range(min..max).map(|eav| eav.clone().into())
-    }
-
-    pub fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_ {
-        let min = AVE {
-            a: a.clone(),
-            v: v.clone(),
-            e: Entity::min(),
-        };
-        let max = AVE {
-            a: a.clone(),
-            v: v.next(),
-            e: Entity::min(),
-        };
-        self.ave.range(min..max).map(|ave| ave.clone().into())
-    }
-
     fn get_entity_by_ident(&self, ident: &str) -> Option<Entity> {
-        self.iter_attribute_value(self.builtins.ident, Value::Str(ident.to_string()))
+        self.iter_attribute_value(self.builtins().ident, Value::Str(ident.to_string()))
             .next()
             .map(|eav| eav.e)
     }
 
-    pub fn get_attribute_id(&self, a: &Attribute) -> Result<Entity> {
+    fn get_attribute_id(&self, a: &Attribute) -> Result<Entity> {
         match self.get_entity_by_ident(&a.0) {
             Some(e) => Ok(e),
             None => Err(format!("Could not find id for attribute `{}`", a.0)),
@@ -255,7 +184,7 @@ impl Store {
     }
 
     fn get_attribute(&self, e: Entity) -> Result<Attribute> {
-        match self.iter_entity_attribute(e, self.builtins.ident).next() {
+        match self.iter_entity_attribute(e, self.builtins().ident).next() {
             None => Err(format!("Could not get attribute name for entity {}", e.0)),
             Some(eav) => match eav.v {
                 Value::Str(a) => Ok(Attribute(a)),
@@ -268,22 +197,22 @@ impl Store {
     }
 
     fn get_attribute_type(&self, e: Entity) -> Result<Type> {
-        match self.iter_entity_attribute(e, self.builtins.type_).next() {
+        match self.iter_entity_attribute(e, self.builtins().type_).next() {
             None => {
                 let a = self.get_attribute(e)?;
                 Err(format!("Could not get type for attribute {a}. DB corrupt?"))
             }
             Some(eav) => match eav.v {
                 Value::Ref(i) => {
-                    if i == self.builtins.float.0 {
+                    if i == self.builtins().float.0 {
                         Ok(Type::Float)
-                    } else if i == self.builtins.int.0 {
+                    } else if i == self.builtins().int.0 {
                         Ok(Type::Int)
-                    } else if i == self.builtins.string.0 {
+                    } else if i == self.builtins().string.0 {
                         Ok(Type::Str)
-                    } else if i == self.builtins.ref_.0 {
+                    } else if i == self.builtins().ref_.0 {
                         Ok(Type::Ref)
-                    } else if i == self.builtins.bool.0 {
+                    } else if i == self.builtins().bool.0 {
                         Ok(Type::Bool)
                     } else {
                         Err(format!(
@@ -300,7 +229,7 @@ impl Store {
     }
 
     #[must_use]
-    pub fn check_attribute_type(&self, a: Entity, v: &Value) -> Result<()> {
+    fn check_attribute_type(&self, a: Entity, v: &Value) -> Result<()> {
         let expected = self.get_attribute_type(a)?;
         match (expected, v) {
             (Type::Bool, Value::Bool(_)) => Ok(()),
@@ -317,8 +246,8 @@ impl Store {
         }
     }
 
-    pub fn get_attribute_cardinality(&self, e: Entity) -> Result<Cardinality> {
-        match self.iter_entity_attribute(e, self.builtins.card).next() {
+    fn get_attribute_cardinality(&self, e: Entity) -> Result<Cardinality> {
+        match self.iter_entity_attribute(e, self.builtins().card).next() {
             None => {
                 let a = self.get_attribute(e)?;
                 Err(format!(
@@ -327,9 +256,9 @@ impl Store {
             }
             Some(eav) => match eav.v {
                 Value::Ref(i) => {
-                    if i == self.builtins.one.0 {
+                    if i == self.builtins().one.0 {
                         Ok(Cardinality::One)
-                    } else if i == self.builtins.many.0 {
+                    } else if i == self.builtins().many.0 {
                         Ok(Cardinality::Many)
                     } else {
                         Err(format!(
@@ -358,7 +287,7 @@ impl Store {
         })
     }
 
-    pub fn resolve_where(&self, whr: &Where<Attribute>) -> Result<Where<Entity>> {
+    fn resolve_where(&self, whr: &Where<Attribute>) -> Result<Where<Entity>> {
         match whr {
             Where::Pattern(p) => Ok(Where::Pattern(self.resolve_pattern(&p)?)),
             Where::And(l, r) => Ok(Where::and(self.resolve_where(l)?, self.resolve_where(r)?)),
@@ -366,7 +295,7 @@ impl Store {
         }
     }
 
-    pub fn resolve_result(&self, table: HashSet<Vec<Value>>) -> HashSet<Vec<Value>> {
+    fn resolve_result(&self, table: HashSet<Vec<Value>>) -> HashSet<Vec<Value>> {
         table
             .into_iter()
             .map(|row| {
@@ -387,21 +316,20 @@ impl Store {
             .collect()
     }
 
-    pub fn save<B: Backend>(&self, mut backend: B) -> Result<B> {
+    fn save<B: Backend>(&self, mut backend: B) -> Result<B> {
         backend.save(self.iter())
     }
 
-    pub fn load<B: Backend>(mut backend: B) -> Result<Self> {
-        let mut s = Store {
-            eav: BTreeSet::new(),
-            ave: BTreeSet::new(),
-            builtins: Builtins::default(),
-            next_id: 0,
-            next_tx: 1,
-        };
+    fn load<B: Backend>(mut backend: B) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let mut s = Self::naked();
 
+        let mut largest_id = 0;
         let mut ident = Entity(0);
         for eav in backend.load()? {
+            largest_id = largest_id.max(eav.e.0);
             if eav.e == eav.a && eav.v == Value::Str("db/ident".to_string()) {
                 ident = eav.e;
             }
@@ -409,11 +337,12 @@ impl Store {
         }
 
         // Need this to recover builtin entities
-        s.builtins.ident = ident;
+        s.set_builtins(Builtins {
+            ident,
+            ..Default::default()
+        });
 
-        if let Some(last) = s.eav.last() {
-            s.next_id = last.e.0 + 1;
-        }
+        s.set_next_id(Entity(largest_id + 1));
 
         macro_rules! recover_builtin {
             ($ident:literal) => {
@@ -429,7 +358,7 @@ impl Store {
             };
         }
 
-        s.builtins = Builtins {
+        s.set_builtins(Builtins {
             ident,
             type_: recover_builtin!("db/type"),
             card: recover_builtin!("db/cardinality"),
@@ -441,12 +370,15 @@ impl Store {
             int: recover_builtin!("db.type/int"),
             float: recover_builtin!("db.type/float"),
             bool: recover_builtin!("db.type/bool"),
-        };
+        });
 
         Ok(s)
     }
 
-    pub fn transact(&mut self, tx: Transact) -> Result<IdMapping> {
+    fn transact(&mut self, tx: Transact) -> Result<IdMapping>
+    where
+        Self: Sized,
+    {
         let (updates, mapping) = tx.compile(self)?;
         for u in updates {
             if u.add {
@@ -459,13 +391,127 @@ impl Store {
     }
 
     /// Returns tempref with id `x`. Can be created with `add` macro.
-    pub fn new_entity(&mut self, tx: Transact) -> Result<Entity> {
+    fn new_entity(&mut self, tx: Transact) -> Result<Entity>
+    where
+        Self: Sized,
+    {
         let mapping = self.transact(tx)?;
         Ok(mapping[&"x".to_string()])
     }
 
-    pub fn query(&self, q: Query) -> Result<HashSet<Vec<Value>>> {
+    fn query(&self, q: Query) -> Result<HashSet<Vec<Value>>>
+    where
+        Self: Sized,
+    {
         q.qeval(self)
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct MemStore {
+    eav: BTreeSet<EAV>,
+    ave: BTreeSet<AVE>,
+    builtins: Builtins,
+    next_id: u64,
+    next_tx: u64,
+}
+
+impl Store for MemStore {
+    fn naked() -> Self {
+        MemStore {
+            eav: BTreeSet::new(),
+            ave: BTreeSet::new(),
+            builtins: Builtins::default(),
+            next_id: 0,
+            next_tx: 1,
+        }
+    }
+
+    fn new() -> Self {
+        let mut s = Self::naked();
+
+        s.builtins = Builtins::build(&mut s);
+
+        s
+    }
+
+    fn builtins(&self) -> &Builtins {
+        &self.builtins
+    }
+
+    fn set_builtins(&mut self, builtins: Builtins) {
+        self.builtins = builtins;
+    }
+
+    fn set_next_id(&mut self, next_id: Entity) {
+        self.next_id = next_id.0;
+    }
+
+    fn next_entity_id(&mut self) -> Entity {
+        let result = Entity(self.next_id);
+        self.next_id += 1;
+        result
+    }
+
+    fn insert_raw(&mut self, e: Entity, a: Entity, v: impl Clone + Into<Value>) {
+        self.eav.insert(EAV {
+            e,
+            a,
+            v: v.clone().into(),
+        });
+        self.ave.insert(AVE { a, v: v.into(), e });
+        self.next_id = self.next_id.max(e.0 + 1);
+    }
+
+    fn retract_raw(&mut self, e: Entity, a: Entity, v: Value) {
+        self.eav.remove(&EAV { e, a, v: v.clone() });
+        self.ave.remove(&AVE { a, v, e });
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &EAV> + '_ {
+        self.eav.iter()
+    }
+
+    fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_ {
+        let min = EAV {
+            e,
+            a: Entity::min(),
+            v: Value::min(),
+        };
+        let max = EAV {
+            e: e.next(),
+            a: Entity::min(),
+            v: Value::min(),
+        };
+        self.eav.range(min..max).map(|eav| eav.clone().into())
+    }
+
+    fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_ {
+        let min = EAV {
+            e,
+            a: a.clone(),
+            v: Value::min(),
+        };
+        let max = EAV {
+            e,
+            a: a.next(),
+            v: Value::min(),
+        };
+        self.eav.range(min..max).map(|eav| eav.clone().into())
+    }
+
+    fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_ {
+        let min = AVE {
+            a: a.clone(),
+            v: v.clone(),
+            e: Entity::min(),
+        };
+        let max = AVE {
+            a: a.clone(),
+            v: v.next(),
+            e: Entity::min(),
+        };
+        self.ave.range(min..max).map(|ave| ave.clone().into())
     }
 }
 
@@ -495,13 +541,13 @@ impl From<AVE> for EAV {
 
 #[cfg(test)]
 mod tests {
-    use crate::datom;
+    use crate::{datom, store::Store};
 
-    use super::{Cardinality, Store, Type};
+    use super::{Cardinality, MemStore, Type};
 
     #[test]
     fn insert_type_check() {
-        let mut s = Store::new();
+        let mut s = MemStore::new();
         s.add_attribute("foo", Type::Int, Cardinality::One, "")
             .unwrap();
 

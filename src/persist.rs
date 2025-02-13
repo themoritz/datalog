@@ -54,14 +54,17 @@ impl Backend for Json {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::{movies::DATA, store::Store};
+    use crate::{
+        movies::DATA,
+        store::{MemStore, Store},
+    };
 
     use super::Json;
 
     #[test]
     fn json_roundtrip() {
         let serialized = DATA.save(Json::new()).unwrap();
-        let recovered = Store::load(serialized).unwrap();
+        let recovered = MemStore::load(serialized).unwrap();
         assert_eq!(recovered, *DATA);
     }
 
