@@ -2,7 +2,8 @@ use lazy_static;
 
 use crate::{
     datom,
-    store::{Cardinality, MemStore, Store, Type},
+    mem_store::MemStore,
+    store::{Cardinality, Store, Type},
     Ref,
 };
 

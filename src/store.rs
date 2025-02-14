@@ -1,7 +1,6 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 
 use crate::{
-    persist::Backend,
     query::{Entry, Pattern, Query, Where},
     transact::{IdMapping, Transact},
     Attribute, Datom, Entity, Result, Value,
@@ -24,17 +23,17 @@ pub enum Cardinality {
 
 #[derive(Default, PartialEq, Debug, Clone)]
 pub struct Builtins {
-    ident: Entity,
-    type_: Entity,
-    card: Entity,
-    doc: Entity,
-    one: Entity,
-    many: Entity,
-    ref_: Entity,
-    string: Entity,
-    int: Entity,
-    float: Entity,
-    bool: Entity,
+    pub ident: Entity,
+    pub type_: Entity,
+    pub card: Entity,
+    pub doc: Entity,
+    pub one: Entity,
+    pub many: Entity,
+    pub ref_: Entity,
+    pub string: Entity,
+    pub int: Entity,
+    pub float: Entity,
+    pub bool: Entity,
 }
 
 impl Builtins {
@@ -55,7 +54,7 @@ impl Builtins {
         }
     }
 
-    fn build<S: Store>(s: &mut S) -> Self {
+    pub fn initialize<S: Store>(s: &mut S) -> Self {
         let ident = Entity(0);
         let type_ = Entity(1);
         let card = Entity(2);
@@ -67,15 +66,15 @@ impl Builtins {
         s.insert_raw(one, ident, "db.cardinality/one");
         s.insert_raw(many, ident, "db.cardinality/many");
 
-        let ref_ = s.next_entity_id();
+        let ref_ = Entity(6);
         s.insert_raw(ref_, ident, "db.type/ref");
-        let string = s.next_entity_id();
+        let string = Entity(7);
         s.insert_raw(string, ident, "db.type/string");
-        let int = s.next_entity_id();
+        let int = Entity(8);
         s.insert_raw(int, ident, "db.type/int");
-        let float = s.next_entity_id();
+        let float = Entity(9);
         s.insert_raw(float, ident, "db.type/float");
-        let bool = s.next_entity_id();
+        let bool = Entity(10);
         s.insert_raw(bool, ident, "db.type/bool");
 
         s.insert_raw(ident, ident, "db/ident");
@@ -115,32 +114,17 @@ impl Builtins {
 }
 
 pub trait Store {
-    fn naked() -> Self;
-    // fn new() -> Self;
     fn builtins(&self) -> &Builtins;
-    fn set_builtins(&mut self, builtins: Builtins);
-    fn set_next_id(&mut self, next_id: Entity);
-    fn next_entity_id(&mut self) -> Entity;
+    fn fresh_entity_id(&mut self) -> Entity;
     fn insert_raw(&mut self, e: Entity, a: Entity, v: impl Clone + Into<Value>);
     fn retract_raw(&mut self, e: Entity, a: Entity, v: Value);
+
     fn iter(&self) -> impl Iterator<Item = EAV> + '_;
     fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_;
     fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_;
     fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_;
 
     /// PROVIDED:
-
-    fn new() -> Self
-    where
-        Self: Sized,
-    {
-        let mut s = Self::naked();
-
-        let builtins = Builtins::build(&mut s);
-        s.set_builtins(builtins);
-
-        s
-    }
 
     fn add_attribute(
         &mut self,
@@ -153,7 +137,7 @@ pub trait Store {
             return Err("Attribute already defined".to_string());
         }
 
-        let e = self.next_entity_id();
+        let e = self.fresh_entity_id();
 
         self.insert_raw(e, self.builtins().ident, name);
         self.insert_raw(e, self.builtins().type_, self.builtins().type_entity(type_));
@@ -328,65 +312,6 @@ pub trait Store {
             .collect()
     }
 
-    fn save<B: Backend>(&self, mut backend: B) -> Result<B> {
-        backend.save(self.iter())
-    }
-
-    fn load<B: Backend>(mut backend: B) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let mut s = Self::naked();
-
-        let mut largest_id = 0;
-        let mut ident = Entity(0);
-        for eav in backend.load()? {
-            largest_id = largest_id.max(eav.e.0);
-            if eav.e == eav.a && eav.v == Value::Str("db/ident".to_string()) {
-                ident = eav.e;
-            }
-            s.insert_raw(eav.e, eav.a, eav.v);
-        }
-
-        // Need this to recover builtin entities
-        s.set_builtins(Builtins {
-            ident,
-            ..Default::default()
-        });
-
-        s.set_next_id(Entity(largest_id + 1));
-
-        macro_rules! recover_builtin {
-            ($ident:literal) => {
-                match s.get_entity_by_ident($ident) {
-                    Some(e) => e,
-                    None => {
-                        return Err(format!(
-                            "Could not find built-in entity `{}`. DB corrupt?",
-                            $ident
-                        ))
-                    }
-                }
-            };
-        }
-
-        s.set_builtins(Builtins {
-            ident,
-            type_: recover_builtin!("db/type"),
-            card: recover_builtin!("db/cardinality"),
-            doc: recover_builtin!("db/doc"),
-            one: recover_builtin!("db.cardinality/one"),
-            many: recover_builtin!("db.cardinality/many"),
-            ref_: recover_builtin!("db.type/ref"),
-            string: recover_builtin!("db.type/string"),
-            int: recover_builtin!("db.type/int"),
-            float: recover_builtin!("db.type/float"),
-            bool: recover_builtin!("db.type/bool"),
-        });
-
-        Ok(s)
-    }
-
     fn transact(&mut self, tx: Transact) -> Result<IdMapping>
     where
         Self: Sized,
@@ -419,106 +344,6 @@ pub trait Store {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub struct MemStore {
-    eav: BTreeSet<EAV>,
-    ave: BTreeSet<AVE>,
-    builtins: Builtins,
-    next_id: u64,
-    next_tx: u64,
-}
-
-impl Store for MemStore {
-    fn naked() -> Self {
-        MemStore {
-            eav: BTreeSet::new(),
-            ave: BTreeSet::new(),
-            builtins: Builtins::default(),
-            next_id: 0,
-            next_tx: 1,
-        }
-    }
-
-    fn builtins(&self) -> &Builtins {
-        &self.builtins
-    }
-
-    fn set_builtins(&mut self, builtins: Builtins) {
-        self.builtins = builtins;
-    }
-
-    fn set_next_id(&mut self, next_id: Entity) {
-        self.next_id = next_id.0;
-    }
-
-    fn next_entity_id(&mut self) -> Entity {
-        let result = Entity(self.next_id);
-        self.next_id += 1;
-        result
-    }
-
-    fn insert_raw(&mut self, e: Entity, a: Entity, v: impl Clone + Into<Value>) {
-        self.eav.insert(EAV {
-            e,
-            a,
-            v: v.clone().into(),
-        });
-        self.ave.insert(AVE { a, v: v.into(), e });
-        self.next_id = self.next_id.max(e.0 + 1);
-    }
-
-    fn retract_raw(&mut self, e: Entity, a: Entity, v: Value) {
-        self.eav.remove(&EAV { e, a, v: v.clone() });
-        self.ave.remove(&AVE { a, v, e });
-    }
-
-    fn iter(&self) -> impl Iterator<Item = EAV> + '_ {
-        self.eav.clone().into_iter()
-    }
-
-    fn iter_entity(&self, e: Entity) -> impl Iterator<Item = EAV> + '_ {
-        let min = EAV {
-            e,
-            a: Entity::min(),
-            v: Value::min(),
-        };
-        let max = EAV {
-            e: e.next(),
-            a: Entity::min(),
-            v: Value::min(),
-        };
-        self.eav.range(min..max).map(|eav| eav.clone().into())
-    }
-
-    fn iter_entity_attribute(&self, e: Entity, a: Entity) -> impl Iterator<Item = EAV> + '_ {
-        let min = EAV {
-            e,
-            a: a.clone(),
-            v: Value::min(),
-        };
-        let max = EAV {
-            e,
-            a: a.next(),
-            v: Value::min(),
-        };
-        self.eav.range(min..max).map(|eav| eav.clone().into())
-    }
-
-    fn iter_attribute_value(&self, a: Entity, v: Value) -> impl Iterator<Item = EAV> + '_ {
-        let min = AVE {
-            a: a.clone(),
-            v: v.clone(),
-            e: Entity::min(),
-        };
-        let max = AVE {
-            a: a.clone(),
-            v: v.next(),
-            e: Entity::min(),
-        };
-        self.ave.range(min..max).map(|ave| ave.clone().into())
-    }
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 pub struct EAV {
     pub e: Entity,
@@ -527,10 +352,10 @@ pub struct EAV {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
-struct AVE {
-    a: Entity,
-    v: Value,
-    e: Entity,
+pub struct AVE {
+    pub a: Entity,
+    pub v: Value,
+    pub e: Entity,
 }
 
 impl From<AVE> for EAV {
@@ -545,9 +370,9 @@ impl From<AVE> for EAV {
 
 #[cfg(test)]
 mod tests {
-    use crate::{datom, store::Store};
+    use crate::{datom, mem_store::MemStore, store::Store};
 
-    use super::{Cardinality, MemStore, Type};
+    use super::{Cardinality, Type};
 
     #[test]
     fn insert_type_check() {

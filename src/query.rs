@@ -4,7 +4,8 @@ use std::{
 };
 
 use crate::{
-    store::{MemStore, Store, EAV},
+    mem_store::MemStore,
+    store::{Store, EAV},
     Attribute, Data, Datom, Entity, Result, Value,
 };
 
@@ -82,7 +83,7 @@ impl Where<Entity> {
                 frames,
                 current_frame: None,
                 store,
-                candidates: Candidates::Strict(Box::new(Vec::new().into_iter())),
+                candidates: Box::new(Vec::new().into_iter()),
             }),
             Where::And(left, right) => right.qeval(store, left.qeval(store, frames)),
             Where::Or(left, right) => Box::new(OrI {
@@ -96,18 +97,12 @@ impl Where<Entity> {
     }
 }
 
-// TODO: Differentiation not needed
-enum Candidates<'a> {
-    Lazy(Box<dyn Iterator<Item = EAV> + 'a>),
-    Strict(Box<dyn Iterator<Item = EAV> + 'a>),
-}
-
 struct PatternI<'a, I, S> {
     pattern: &'a Pattern<Entity>,
     frames: I,
     current_frame: Option<Frame>,
     store: &'a S,
-    candidates: Candidates<'a>,
+    candidates: Box<dyn Iterator<Item = EAV> + 'a>,
 }
 
 impl<'a, I: Iterator<Item = Frame>, S: Store> PatternI<'a, I, S> {
@@ -124,18 +119,14 @@ impl<'a, I: Iterator<Item = Frame>, S: Store> PatternI<'a, I, S> {
             Some(frame) => {
                 self.current_frame = Some(frame.clone());
                 if let Some((entity, attribute)) = self.pattern.entity_attribute_bound(&frame) {
-                    self.candidates = Candidates::Strict(Box::new(
-                        self.store.iter_entity_attribute(entity, attribute),
-                    ));
+                    self.candidates = Box::new(self.store.iter_entity_attribute(entity, attribute));
                 } else if let Some(entity) = self.pattern.entity_bound(&frame) {
-                    self.candidates = Candidates::Strict(Box::new(self.store.iter_entity(entity)));
+                    self.candidates = Box::new(self.store.iter_entity(entity));
                 } else if let Some((attribute, value)) = self.pattern.attribute_value_bound(&frame)
                 {
-                    self.candidates = Candidates::Strict(Box::new(
-                        self.store.iter_attribute_value(attribute, value),
-                    ));
+                    self.candidates = Box::new(self.store.iter_attribute_value(attribute, value));
                 } else {
-                    self.candidates = Candidates::Lazy(Box::new(self.store.iter()));
+                    self.candidates = Box::new(self.store.iter());
                 }
                 self.next()
             }
@@ -150,15 +141,9 @@ impl<'a, I: Iterator<Item = Frame>, S: Store> Iterator for PatternI<'a, I, S> {
     // TODO: Avoid recursion
     fn next(&mut self) -> Option<Self::Item> {
         match self.current_frame {
-            Some(ref frame) => match self.candidates {
-                Candidates::Lazy(ref mut i) => match i.next() {
-                    Some(datom) => self.match_(frame.clone(), &datom),
-                    None => self.next_frame(),
-                },
-                Candidates::Strict(ref mut i) => match i.next() {
-                    Some(datom) => self.match_(frame.clone(), &datom),
-                    None => self.next_frame(),
-                },
+            Some(ref frame) => match self.candidates.next() {
+                Some(datom) => self.match_(frame.clone(), &datom),
+                None => self.next_frame(),
             },
             None => self.next_frame(),
         }
@@ -435,7 +420,12 @@ mod tests {
 
     use super::*;
 
-    use crate::{datom, movies::DATA, movies::STORE, row, table, Ref};
+    use crate::{
+        datom,
+        mem_store::MemStore,
+        movies::{DATA, STORE},
+        row, table, Ref,
+    };
 
     #[test]
     fn macro_query() {

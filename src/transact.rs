@@ -26,7 +26,7 @@ impl Entity {
             Entity::TempRef(tempref) => Entity::Entity(
                 mapping
                     .entry(tempref)
-                    .or_insert_with(|| store.next_entity_id())
+                    .or_insert_with(|| store.fresh_entity_id())
                     .clone(),
             ),
         }
@@ -85,7 +85,7 @@ impl Value {
             Value::Value(v) => Value::Value(v),
             Value::TempRef(tempref) => mapping
                 .entry(tempref)
-                .or_insert_with(|| store.next_entity_id())
+                .or_insert_with(|| store.fresh_entity_id())
                 .clone()
                 .into(),
         }
@@ -262,7 +262,7 @@ impl Add {
                     }
                 }
 
-                let new_e = store.next_entity_id();
+                let new_e = store.fresh_entity_id();
                 result.push(Update {
                     add: true,
                     e,

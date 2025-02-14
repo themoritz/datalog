@@ -54,10 +54,7 @@ impl Backend for Json {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::{
-        movies::DATA,
-        store::{MemStore, Store},
-    };
+    use crate::{mem_store::MemStore, movies::DATA};
 
     use super::Json;
 

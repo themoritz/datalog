@@ -268,7 +268,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde::Deserialize;
 
-    use crate::{movies::STORE, pull::PullValue, store::MemStore, Attribute, Value};
+    use crate::{mem_store::MemStore, movies::STORE, pull::PullValue, Attribute, Value};
 
     use super::Api;
 

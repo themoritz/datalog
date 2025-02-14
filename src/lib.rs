@@ -10,6 +10,7 @@ use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 #[cfg(any(test, feature = "bench"))]
 pub mod movies;
 
+pub mod mem_store;
 pub mod persist;
 pub mod pg_store;
 pub mod pull;
@@ -207,11 +208,10 @@ macro_rules! row {
 
 #[cfg(test)]
 mod tests {
+    use mem_store::MemStore;
     use pretty_assertions::assert_eq;
-    use store::{Cardinality, MemStore, Type};
+    use store::{Cardinality, Store, Type};
     use transact::Tmp;
-
-    use crate::store::Store;
 
     use super::*;
 
