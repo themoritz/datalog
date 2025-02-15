@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     store::{Cardinality, Store},
     Attribute, Result,
@@ -101,19 +103,31 @@ impl Value {
     }
 }
 
+/// Higher level things that the user might want to do. These get compiled
+/// down to a list of insertions and retractions.
 #[derive(Debug, PartialEq)]
 pub enum Transact {
+    /// Add a new entity. Attributes of it are defined in `add`.
     Add { e: Entity, add: Add },
+    /// Retract a specific value of an attribute (in case of many-to-one).
     RetractValue { e: Entity, a: Attribute, v: Value },
+    /// Retract an attribute (all associated values).
     RetractAttribute { e: Entity, a: Attribute },
+    /// Retract a whole entity with all attributes and values.
     Retract { e: Entity },
+    /// A list of things to do.
     List(Vec<Transact>),
 }
 
+/// Properties of an entity to add. The entity id is in the context of
+/// this operation.
 #[derive(Debug, PartialEq)]
 pub enum Add {
+    /// Set value of one attribute.
     Value { a: Attribute, v: Value },
+    /// Create a sub entity ("component") with the attributes defined in `sub`.
     Component { a: Attribute, sub: Box<Add> },
+    /// Set a list of attributes.
     List(Vec<Add>),
 }
 
@@ -241,6 +255,8 @@ impl Add {
 
                 let mut result = vec![];
 
+                // If this is a one-to-one relationship we need to delete the
+                // old entity at this attribute.
                 if let Cardinality::One = store.get_attribute_cardinality(a)? {
                     for eav in store.iter_entity_attribute(e, a).collect::<Vec<_>>() {
                         let comp_e = match &eav.v {
@@ -305,7 +321,7 @@ impl Add {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Update {
     pub add: bool,
     pub e: crate::Entity,

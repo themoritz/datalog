@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
     query::{Entry, Pattern, Query, Where},
-    transact::{IdMapping, Transact},
+    transact::{IdMapping, Transact, Update},
     Attribute, Datom, Entity, Result, Value,
 };
 
@@ -317,6 +317,11 @@ pub trait Store {
         Self: Sized,
     {
         let (updates, mapping) = tx.compile(self)?;
+        self.apply_updates(updates);
+        Ok(mapping)
+    }
+
+    fn apply_updates(&mut self, updates: Vec<Update>) {
         for u in updates {
             if u.add {
                 self.insert_raw(u.e, u.a, u.v);
@@ -324,7 +329,16 @@ pub trait Store {
                 self.retract_raw(u.e, u.a, u.v);
             }
         }
-        Ok(mapping)
+    }
+
+    fn undo_updates(&mut self, updates: Vec<Update>) {
+        for u in updates.into_iter().rev() {
+            if u.add {
+                self.retract_raw(u.e, u.a, u.v);
+            } else {
+                self.insert_raw(u.e, u.a, u.v);
+            }
+        }
     }
 
     /// Returns tempref with id `x`. Can be created with `add` macro.

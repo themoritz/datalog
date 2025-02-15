@@ -29,7 +29,7 @@ pub trait Data: PartialEq + Clone {
     fn embed(self) -> Value;
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug, Default)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Entity(pub u64);
 
 impl Entity {
