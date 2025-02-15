@@ -10,6 +10,7 @@ use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 #[cfg(any(test, feature = "bench"))]
 pub mod movies;
 
+pub mod parsers;
 pub mod mem_store;
 pub mod persist;
 pub mod pg_store;

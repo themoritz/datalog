@@ -347,7 +347,7 @@ macro_rules! query {
     };
 
     (@entry_entity $val:expr) => {
-        $crate::query::Entry::Lit(Entity($val))
+        $crate::query::Entry::Lit($crate::Entity($val))
     };
 
     (@entry_attr $var:literal) => {
