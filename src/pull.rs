@@ -245,7 +245,7 @@ macro_rules! pull {
 
     // Next simple attribute
     (@list [$($elems:expr),*] $a:literal $($rest:tt)*) => {
-        pull!(@list [$($elems,)* $crate::pull::Api::In(Attribute($a.to_string()), Box::new($crate::pull::Api::Return))] $($rest)*)
+        pull!(@list [$($elems,)* $crate::pull::Api::In($crate::Attribute($a.to_string()), Box::new($crate::pull::Api::Return))] $($rest)*)
     };
 
     // Next simple attribute back

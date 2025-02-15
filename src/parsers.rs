@@ -2,16 +2,15 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while},
     character::complete::{char, digit1, multispace0},
-    combinator::{map, map_res, recognize},
+    combinator::{map, map_res, opt, recognize},
     error::ParseError,
     multi::separated_list0,
-    sequence::{delimited, separated_pair, tuple},
+    sequence::{delimited, preceded, separated_pair, tuple},
     IResult,
 };
 
 use crate::{
-    query::{Entry, Pattern, Query, Var, Where},
-    Attribute, Entity, Value,
+    pull::Api, query::{Entry, Pattern, Query, Var, Where}, Attribute, Entity, Value
 };
 
 /// Whitespace combinator
@@ -105,7 +104,7 @@ fn parse_entry_entity(input: &str) -> IResult<&str, Entry<Entity>> {
 fn parse_entry_attribute(input: &str) -> IResult<&str, Entry<Attribute>> {
     alt((
         map(parse_var_name, Entry::Var),
-        map(parse_string_literal, |s| Entry::Lit(Attribute(s))),
+        map(parse_string, |s| Entry::Lit(Attribute(s))),
     ))(input)
 }
 
@@ -130,7 +129,7 @@ fn parse_u64(input: &str) -> IResult<&str, u64> {
     map_res(ws(digit1), |s: &str| s.parse::<u64>())(input)
 }
 
-fn parse_string_literal(input: &str) -> IResult<&str, String> {
+fn parse_string(input: &str) -> IResult<&str, String> {
     delimited(
         char('"'),
         map(take_while(|c| c != '"'), |s: &str| s.to_string()),
@@ -147,7 +146,7 @@ fn parse_float(input: &str) -> IResult<&str, f64> {
 fn parse_value(input: &str) -> IResult<&str, Value> {
     alt((
         // String literal
-        map(parse_string_literal, Value::Str),
+        map(parse_string, Value::Str),
         // Bool literal
         map(alt((tag("true"), tag("false"))), |s: &str| {
             Value::Bool(s == "true")
@@ -161,16 +160,57 @@ fn parse_value(input: &str) -> IResult<&str, Value> {
     ))(input)
 }
 
+/// Parse an item: it may be preceded by `<-` (for a `Back`), then a string,
+/// and optionally a colon and a nested list.
+/// A bare string is taken as an `In` with `Return` as its nested value.
+fn parse_pull_item(input: &str) -> IResult<&str, Api> {
+    // Optional `<-` indicates a backward traversal.
+    let (input, maybe_back) = opt(ws(tag("<-")))(input)?;
+    // Parse the field name.
+    let (input, field) = parse_string(input)?;
+    // Optionally, parse a colon and a nested block.
+    let (input, nested) = opt(preceded(
+        ws(char(':')),
+        parse_pull_list,
+    ))(input)?;
+
+    let attribute = Attribute(field);
+
+    let api = match (maybe_back, nested) {
+        (Some(_), Some(n)) => Api::Back(attribute, Box::new(n)),
+        (Some(_), None) => Api::Back(attribute, Box::new(Api::Return)),
+        (None, Some(n)) => Api::In(attribute, Box::new(n)),
+        (None, None) => Api::In(attribute, Box::new(Api::Return)),
+    };
+    Ok((input, api))
+}
+
+/// Parse a list of items, i.e. a block delimited by `{` and `}`.
+fn parse_pull_list(input: &str) -> IResult<&str, Api> {
+    let (input, items) = delimited(
+        ws(char('{')),
+        separated_list0(ws(char(',')), parse_pull_item),
+        ws(char('}')),
+    )(input)?;
+    Ok((input, Api::List(items)))
+}
+
+/// Top-level parser.
+pub fn parse_pull(input: &str) -> IResult<&str, Api> {
+    alt((parse_pull_list, parse_pull_item))(input)
+}
+
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::{query, Value};
+    use crate::{query, Value, pull};
 
-    use super::parse_query;
+    use super::{parse_pull, parse_query};
 
     #[test]
-    fn test_parse() {
+    fn test_query() {
         let input = r#"{ find: [?a], where: [(?a, "foo" = Ref(3))] }"#;
         let (_, query) = parse_query(input).unwrap();
 
@@ -185,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse2() {
+    fn test_query2() {
         let input = r#"
             {
                 find: [?a, ?b],
@@ -224,6 +264,34 @@ mod tests {
                 ]
             ]
         };
+
+        assert_eq!(query, expected);
+    }
+
+    #[test]
+    fn test_pull() {
+        let input = r#"
+            {
+                "movie/title",
+                "movie/cast": {
+                    "person/name",
+                    <- "movie/cast": {
+                        "movie/title"
+                    }
+                }
+            }
+        "#;
+        let (_, query) = parse_pull(input).unwrap();
+
+        let expected = pull!({
+            "movie/title",
+            "movie/cast": {
+                "person/name",
+                <- "movie/cast": {
+                    "movie/title"
+                }
+            }
+        });
 
         assert_eq!(query, expected);
     }
