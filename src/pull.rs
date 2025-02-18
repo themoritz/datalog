@@ -250,7 +250,7 @@ macro_rules! pull {
 
     // Next simple attribute back
     (@list [$($elems:expr),*] <- $a:literal $($rest:tt)*) => {
-        pull!(@list [$($elems,)* $crate::pull::Api::Back(Attribute($a.to_string()), Box::new($crate::pull::Api::Return))] $($rest)*)
+        pull!(@list [$($elems,)* $crate::pull::Api::Back($crate::Attribute($a.to_string()), Box::new($crate::pull::Api::Return))] $($rest)*)
     };
 
     // Comma

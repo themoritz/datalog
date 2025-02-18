@@ -10,8 +10,8 @@ use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
 #[cfg(any(test, feature = "bench"))]
 pub mod movies;
 
-pub mod parsers;
 pub mod mem_store;
+pub mod parsers;
 pub mod persist;
 pub mod pg_store;
 pub mod pull;
@@ -29,7 +29,9 @@ pub trait Data: PartialEq + Clone {
     fn embed(self) -> Value;
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Clone, Debug, Default, Deserialize, Serialize,
+)]
 pub struct Entity(pub u64);
 
 impl Entity {
